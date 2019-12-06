@@ -12,11 +12,11 @@ class Datasets(Dataset):
     def __init__(self, file_path, label_list=None, pretrained_type='skt', objective='classification', max_len=64):
         self.objective = objective
         self.max_len = max_len
-        self.corpus, self.label = self.get_data(file_path)
         if label_list is not None:
             # multi_label = ['공포', '놀람', '분노', '슬픔', '중립', '행복', '혐오']
             # binary_label = ['긍정', '부정']
             self.label2idx = dict(zip(label_list, range(len(label_list))))
+        self.corpus, self.label = self.get_data(file_path)
         self.pretrained_type = pretrained_type
         self.tokenizer, self.vocab = get_pretrained_model(pretrained_type)
 
@@ -37,8 +37,8 @@ class Datasets(Dataset):
 
         # Change wordpiece to indices
         tokens = self.tokenizer.convert_tokens_to_ids(tokens)
-
-        label = self.label[idx] if self.objective != 'MLM' else None
+        
+        label = self.label[idx] if self.label is not None else None
 
         return tokens, label
 

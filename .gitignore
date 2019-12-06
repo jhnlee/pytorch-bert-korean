@@ -1,2 +1,5 @@
 data/
 pretrained_model/
+train.py
+__pycache__/
+model_saved/
