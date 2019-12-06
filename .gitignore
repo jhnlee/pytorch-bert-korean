@@ -3,3 +3,4 @@ pretrained_model/
 train.py
 __pycache__/
 model_saved/
+fp16 test/

@@ -2,6 +2,10 @@ import json
 import torch
 import logging
 from pathlib import Path
+import tqdm
+from datetime import datetime
+import os
+import pandas as pd
 
 
 formatter = logging.Formatter('[%(asctime)s] [%(name)s] [%(levelname)s] %(message)s')
@@ -12,7 +16,7 @@ def get_logger(name=None, level=logging.DEBUG):
     logger.handlers.clear()
     logger.setLevel(level)
 
-    ch = logging.StreamHandler()
+    ch = TqdmLoggingHandler()
     ch.setLevel(level)
     ch.setFormatter(formatter)
 
@@ -20,35 +24,61 @@ def get_logger(name=None, level=logging.DEBUG):
     return logger
 
 
-def acc(yhat, y):
-    with torch.no_grad():
-        acc = (yhat == y).float().mean()
-    return acc
+class TqdmLoggingHandler(logging.StreamHandler):
+    """ logging handler for tqdm """
+
+    def __init__(self, level=logging.NOTSET):
+        super(TqdmLoggingHandler, self).__init__(level)
+
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            tqdm.tqdm.write(msg)
+            self.flush()
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except:
+            self.handleError(record)
 
 
-class SummaryManager:
-    def __init__(self, model_dir):
-        if not isinstance(model_dir, Path):
-            model_dir = Path(model_dir)
-        self._model_dir = model_dir
-        self._summary = {}
+class ResultWriter:
+    def __init__(self, dir):
+        """ Save training Summary to .csv 
+        input
+            args: training args
+            results: training results (dict)
+                - results should contain a key name 'val_loss'
+        """
+        self.dir = dir
+        self.hparams = None
+        self.load()
+        self.writer = dict()
 
-    def save(self, filename):
-        with open(self._model_dir / filename, mode='w') as io:
-            json.dump(self._summary, io, indent=4)
+    def update(self, args, **results):
+        assert 'val_loss' in results.keys(), 'should contain \'val_loss\' as key in dictionary'
+        now = datetime.now()
+        date = '%s-%s-%s %s:%s' % (now.year, now.month, now.day, now.hour, now.minute)
+        self.writer.update({'date': date})
+        self.writer.update(results)
+        self.writer.update(vars(args))
 
-    def load(self, filename):
-        with open(self._model_dir / filename, mode='r') as io:
-            metric = json.loads(io.read())
-        self.update(metric)
+        if self.hparams is None:
+            self.hparams = pd.DataFrame(self.writer, index=[0])
+        else:
+            self.hparams = self.hparams.append(self.writer, ignore_index=True)
+        self.save()
 
-    def update(self, summary):
-        self._summary.update(summary)
+    def save(self):
+        assert self.hparams is not None
+        self.hparams.to_csv(self.dir, index=False)
 
-    def reset(self):
-        self._summary = {}
-
-    @property
-    def summary(self):
-        return self._summary
-
+    def load(self):
+        path = os.path.split(self.dir)[0]
+        if not os.path.exists(path):
+            os.makedirs(path)
+            self.hparams = None
+        elif os.path.exists(self.dir):
+            self.hparams = pd.read_csv(self.dir)
+        else:
+            self.hparams = None
+            
