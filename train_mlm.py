@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 from datasets import Datasets
-from model import BertForEmotionClassification
+from model import BertForMLM
 from optim import layerwise_decay_optimizer
 
 from sklearn.metrics import classification_report, confusion_matrix
@@ -19,33 +19,47 @@ import utils
 import logging
 import argparse
 import random
+import copy
 import os
 import warnings
 
 warnings.filterwarnings('ignore')
-logger = utils.get_logger('BERT Classification')
+logger = utils.get_logger('BERT MLM')
 logger.setLevel(logging.INFO)
 
 
-class ClassificationBatchFunction:
+class MLMBatchFunction:
     # batch function for pytorch dataloader
-    def __init__(self, max_len, pad_idx, cls_idx, sep_idx):
+    def __init__(self, max_len, vocab, pad_idx, cls_idx, sep_idx, mask_idx):
         self.max_len = max_len
+        self.vocab = vocab
         self.pad_idx = pad_idx
         self.cls_idx = cls_idx
         self.sep_idx = sep_idx
+        self.mask_idx = mask_idx
 
     def __call__(self, batch):
         tokens, label = list(zip(*batch))
 
         # Get max length from batch
         max_len = min(self.max_len, max([len(i) for i in tokens]))
-        tokens = torch.tensor(
-            [self.pad([self.cls_idx] + t + [self.sep_idx], max_len) for t in tokens])
-        masks = torch.ones_like(tokens).masked_fill(
-            tokens == self.pad_idx, 0)
 
-        return tokens, masks, torch.tensor(label)
+        # Use unmasked tokens as vocab labels for MLM
+        masked_tokens, masked_idcs = list(
+            zip(*[self.make_masked_input(t) for t in copy.deepcopy(tokens)]))
+        masked_tokens = torch.tensor(
+            [self.pad([self.cls_idx] + t + [self.sep_idx], max_len) for t in masked_tokens])
+
+        masked_idcs = torch.tensor(
+            [self.pad([self.pad_idx] + t + [self.pad_idx], max_len) for t in masked_idcs])
+        label = torch.tensor(
+            [self.pad([-1] + t + [-1], max_len) for t in tokens])
+        label = label.masked_fill(masked_idcs != 1, -1)
+
+        masks = torch.ones_like(masked_tokens).masked_fill(
+            masked_tokens == self.pad_idx, 0)
+
+        return masked_tokens, label, masks
 
     def pad(self, sample, max_len):
         diff = max_len - len(sample)
@@ -54,6 +68,38 @@ class ClassificationBatchFunction:
         else:
             sample = sample[-max_len:]
         return sample
+
+    def make_masked_input(self, sample):
+        masked_idcs = []
+        for i, token in enumerate(sample):
+            while(sum(masked_idcs) == 0):
+                # sentence must have at least one mask
+                prob = random.random()
+                # mask token with 15%
+                if prob < 0.15:
+                    masked_idcs.append(1)
+                    prob /= 0.15
+
+                    # 80% randomly change token to mask token
+                    if prob < 0.8:
+                        sample[i] = self.mask_idx
+
+                    # 10% randomly change token to random token
+                    elif prob < 0.9:
+                        special_tokens = [self.pad_idx,
+                                        self.mask_idx, self.sep_idx, self.cls_idx]
+                        r = random.choice(range(len(self.vocab)))
+                        while r in special_tokens:
+                            r = random.choice(range(len(self.vocab)))
+                        sample[i] = r
+                        # -> rest 10% randomly keep current token
+                else:
+                    masked_idcs.append(0)
+                    
+                if sum(masked_idcs) == 0:
+                    masked_idcs = []
+
+        return sample, masked_idcs
 
 
 def train(args):
@@ -66,13 +112,6 @@ def train(args):
     else:
         device = torch.device('cpu')
         logger.info('use cpu')
-
-    # Set label list for classification
-    if args.num_label == 'multi':
-        label_list = ['공포', '놀람', '분노', '슬픔', '중립', '행복', '혐오']
-    elif args.num_label == 'binary':
-        label_list = ['긍정', '부정']
-    logger.info('use {} labels for training'.format(len(label_list)))
 
     # Load pretrained model and model configuration
     pretrained_path = os.path.join('./pretrained_model/', args.pretrained_type)
@@ -87,18 +126,16 @@ def train(args):
 
     bert_config = BertConfig(os.path.join(
         pretrained_path + '/bert_config.json'))
-    bert_config.num_labels = len(label_list)
-    model = BertForEmotionClassification(bert_config).to(device)
+    model = BertForMLM(bert_config).to(device)
     model.load_state_dict(pretrained, strict=False)
 
     # Load Datasets
     tr_set = Datasets(file_path=args.train_data_path,
-                      label_list=label_list,
                       pretrained_type=args.pretrained_type,
                       max_len=args.max_len)
 
-    collate_fn = ClassificationBatchFunction(
-        args.max_len, tr_set.pad_idx, tr_set.cls_idx, tr_set.sep_idx)
+    collate_fn = MLMBatchFunction(
+        args.max_len, tr_set.vocab, tr_set.pad_idx, tr_set.cls_idx, tr_set.sep_idx, tr_set.mask_idx)
     tr_loader = DataLoader(dataset=tr_set,
                            batch_size=args.train_batch_size,
                            shuffle=True,
@@ -108,7 +145,6 @@ def train(args):
                            collate_fn=collate_fn)
 
     dev_set = Datasets(file_path=args.dev_data_path,
-                       label_list=label_list,
                        pretrained_type=args.pretrained_type,
                        max_len=args.max_len)
 
@@ -128,7 +164,7 @@ def train(args):
     warmup_steps = int(t_total * args.warmup_percent)
     logger.info('total training steps : {}, lr warmup steps : {}'.format(
         t_total, warmup_steps))
-    scheduler = optimization.WarmupLinearSchedule(
+    scheduler = optimization.WarmupCosineSchedule(
         optimizer, warmup_steps=warmup_steps, t_total=t_total)
 
     # for low-precision training
@@ -143,7 +179,7 @@ def train(args):
             model, optimizer, opt_level=args.fp16_opt_level, verbosity=0)
 
     # tensorboard setting
-    save_path = "./model_saved_finetuning/lr {}, batch {}, len{}, warmup {}, len {}, {}, epoch {}".format(
+    save_path = "./model_saved_pretrain/lr {}, batch {}, len{}, warmup {}, len {}, {}, epoch {}".format(
         args.learning_rate, args.train_batch_size, args.warmup_percent,
         args.gradient_accumulation_steps, args.max_len, args.pretrained_type, args.epochs)
 
@@ -152,7 +188,7 @@ def train(args):
     writer = SummaryWriter(save_path)
 
     # Save best model results with resultwriter
-    result_writer = utils.ResultWriter("./model_saved_finetuning/results.csv")
+    result_writer = utils.ResultWriter("./model_saved_pretrain/results.csv")
     model.zero_grad()
 
     best_val_loss = 1e+9
@@ -162,42 +198,28 @@ def train(args):
     total_result = []
     for epoch in tqdm(range(args.epochs), desc='epochs'):
 
-        train_loss, train_acc, train_f1 = 0, 0, 0
-        logging_loss, logging_acc, logging_f1 = 0, 0, 0
+        train_loss, train_acc = 0, 0
+        logging_loss, logging_acc = 0, 0
 
         for step, batch in tqdm(enumerate(tr_loader), desc='steps', total=len(tr_loader)):
             model.train()
-            x_train, mask_train, y_train = map(lambda x: x.to(device), batch)
+            x_train, y_train, mask_train = map(lambda x: x.to(device), batch)
 
             inputs = {
                 'input_ids': x_train,
                 'attention_mask': mask_train,
-                'classification_label': y_train,
+                'masked_lm_labels': y_train,
             }
 
             output, loss = model(**inputs)
-            y_max = output.max(dim=1)[1]
-
-            cr = classification_report(y_train.tolist(),
-                                       y_max.tolist(),
-                                       labels=list(range(len(label_list))),
-                                       target_names=label_list,
-                                       output_dict=True)
-            # Get accuracy(micro f1)
-            if 'micro avg' not in cr.keys():
-                batch_acc = list(cr.items())[len(label_list)][1]
-            else:
-                # batch 안에 존재하지 않는 label이 있는 경우 average 대신 micro avg로 나옴
-                batch_acc = cr['micro avg']['f1-score']
-            # macro f1
-            batch_macro_f1 = cr['macro avg']['f1-score']
+            y_max = output[0].max(dim=1)[1]
+            batch_acc = (y_max == y_train).float().mean().item()
 
             # accumulate measures
             grad_accu = args.gradient_accumulation_steps
             if grad_accu > 1:
                 loss /= grad_accu
                 batch_acc /= grad_accu
-                batch_macro_f1 /= grad_accu
 
             if args.fp16:
                 with amp.scale_loss(loss, optimizer) as scaled_loss:
@@ -207,27 +229,16 @@ def train(args):
 
             train_loss += loss.item()
             train_acc += batch_acc
-            train_f1 += batch_macro_f1
 
             if (global_step + 1) % args.logging_step == 0:
                 logging_acc = (train_acc - logging_acc) / args.logging_step
-                logging_f1 = (train_f1 - logging_f1) / args.logging_step
                 logging_loss = (train_loss - logging_loss) / args.logging_step
 
-                logger.info('[{}/{}], trn loss : {:.3f}, trn acc : {:.3f}, macro f1 : {:.3f}, lr : {:.3f}'.format(
+                logger.info('[{}/{}], trn loss : {:.3f}, trn acc : {:.3f}, lr : {:.3f}'.format(
                     global_step +
-                    1, t_total, logging_loss, logging_acc, logging_f1, scheduler.get_lr()[
-                        0]
+                    1, t_total, logging_loss, logging_acc, scheduler.get_lr()[0]
                 ))
-                logging_acc, logging_f1, logging_loss = train_acc, train_f1, train_loss
-
-                # Get f1 score for each label
-                f1_results = [(l, r['f1-score']) for i, (l, r)
-                              in enumerate(cr.items()) if i < len(label_list)]
-                f1_log = "\n".join(["{} : {}".format(l, f)
-                                    for l, f in f1_results])
-                logger.info("\n\n***f1-score***\n" + f1_log + "\n\n***confusion matrix***\n{}".format(
-                    confusion_matrix(y_train.tolist(), y_max.tolist())))
+                logging_acc, logging_loss = train_acc, train_loss
 
             if (step + 1) % grad_accu == 0:
                 if args.fp16:
@@ -241,19 +252,18 @@ def train(args):
                 optimizer.step()
                 model.zero_grad()
                 global_step += 1
+                writer.add_scalars('lr', {'lr': scheduler.get_lr()[0]}, global_step + 1)
 
         train_loss /= (step + 1)
         train_acc /= (step+1)
-        train_f1 /= (step+1)
 
         # Validation
-        val_loss, val_acc, val_macro_f1 = evaluate(
-            args, dev_loader, model, device)
-        train_result = '[{}/{}] tr loss : {:.3f}, tr acc : {:.3f}. tr macro f1 : {:.3f}'.format(
-            global_step + 1, t_total, train_loss, train_acc, train_f1
+        val_loss, val_acc= evaluate(args, dev_loader, model, device)
+        train_result = '[{}/{}] tr loss : {:.3f}, tr acc : {:.3f}'.format(
+            global_step + 1, t_total, train_loss, train_acc
         )
-        val_result = '[{}/{}] val loss : {:.3f}, val acc : {:.3f}. val macro f1 : {:.3f}'.format(
-            global_step + 1, t_total, val_loss, val_acc, val_macro_f1
+        val_result = '[{}/{}] val loss : {:.3f}, val acc : {:.3f}'.format(
+            global_step + 1, t_total, val_loss, val_acc
         )
 
         logger.info(train_result)
@@ -264,8 +274,6 @@ def train(args):
                                     'val': val_loss}, global_step + 1)
         writer.add_scalars('acc', {'train': train_acc,
                                    'val': val_acc}, global_step + 1)
-        writer.add_scalars('macro_f1', {'train': train_f1,
-                                        'val': val_macro_f1}, global_step + 1)
 
         if val_loss < best_val_loss:
             # Save model checkpoints
@@ -278,7 +286,7 @@ def train(args):
 
         train_loss, train_acc = 0, 0
 
-    # Save results in 'model_saved_finetuning/results.csv'
+    # Save results in 'model_saved_pretrain/results.csv'
     results = {
         'val_loss': best_val_loss,
         'val_acc': best_val_acc,
@@ -289,11 +297,6 @@ def train(args):
 
 def evaluate(args, dataloader, model, device, objective='classification'):
 
-    if args.num_label == 'multi':
-        label_list = ['공포', '놀람', '분노', '슬픔', '중립', '행복', '혐오']
-    elif args.num_label == 'binary':
-        label_list = ['긍정', '부정']
-
     val_loss, val_acc, val_f1 = 0, 0, 0
     total_y = []
     total_y_hat = []
@@ -301,47 +304,25 @@ def evaluate(args, dataloader, model, device, objective='classification'):
     for val_step, batch in enumerate(dataloader):
         model.eval()
 
-        x_dev, mask_dev, y_dev = map(lambda x: x.to(device), batch)
+        x_dev, y_dev, mask_dev  = map(lambda x: x.to(device), batch)
         total_y += y_dev.tolist()
 
         inputs = {
             'input_ids': x_dev,
             'attention_mask': mask_dev,
-            'classification_label': y_dev,
+            'masked_lm_labels': y_dev,
         }
         with torch.no_grad():
             output, loss = model(**inputs)
-            y_max = output.max(dim=1)[1]
+            y_max = output[0].max(dim=1)[1]
             total_y_hat += y_max.tolist()
 
             val_loss += loss.item()
 
-    # f1-score 계산
-    dev_cr = classification_report(total_y,
-                                   total_y_hat,
-                                   labels=list(range(len(label_list))),
-                                   target_names=label_list,
-                                   output_dict=True)
-
-    # Get accuracy(micro f1)
-    if 'micro avg' not in dev_cr.keys():
-        val_acc = list(dev_cr.items())[len(label_list)][1]
-    else:
-        # batch 안에 존재하지 않는 label이 있는 경우 classification report가 다르게 나옴
-        val_acc = dev_cr['micro avg']['f1-score']
-    # macro f1
-    val_macro_f1 = dev_cr['macro avg']['f1-score']
-
-    logger.info('***** Evaluation Results *****')
-    f1_results = [(l, r['f1-score']) for i, (l, r)
-                  in enumerate(dev_cr.items()) if i < len(label_list)]
-    f1_log = "\n".join(["{} : {}".format(l, f) for l, f in f1_results])
-    logger.info("\n***f1-score***\n" + f1_log + "\n***confusion matrix***\n{}".format(
-        confusion_matrix(total_y, total_y_hat)))
-
+    val_acc = (total_y_hat == total_y).float().mean().item()
     val_loss /= (val_step + 1)
 
-    return val_loss, val_acc, val_macro_f1
+    return val_loss, val_acc
 
 
 def set_seed(args):
@@ -358,13 +339,13 @@ def main():
                         help="type of pretrained model (skt, etri)")
 
     # Train Parameters
-    parser.add_argument("--train_batch_size", default=100, type=int,
+    parser.add_argument("--train_batch_size", default=128, type=int,
                         help="batch size")
-    parser.add_argument("--eval_batch_size", default=100, type=int,
+    parser.add_argument("--eval_batch_size", default=128, type=int,
                         help="batch size for validation")
     parser.add_argument("--layerwise_decay", action="store_true",
                         help="Whether to use layerwise decay")
-    parser.add_argument("--learning_rate", default=1e-5, type=float,
+    parser.add_argument("--learning_rate", default=2e-4, type=float,
                         help="The initial learning rate for Adam")
     parser.add_argument("--epochs", default=5, type=int,
                         help="total epochs")
@@ -376,7 +357,7 @@ def main():
                         help="batch size")
 
     # Other Parameters
-    parser.add_argument("--logging_step", default=100, type=int,
+    parser.add_argument("--logging_step", default=1000, type=int,
                         help="logging step for training loss and acc")
     parser.add_argument("--device", default='cuda', type=str,
                         help="Whether to use cpu or cuda")
@@ -389,13 +370,11 @@ def main():
                         help="Random seed(default=0)")
 
     # Data Parameters
-    parser.add_argument("--train_data_path", default='./data/korean_crawled_train.csv', type=str,
+    parser.add_argument("--train_data_path", default='./data/korean_single_train.csv', type=str,
                         help="train data path")
-    parser.add_argument("--dev_data_path", default='./data/korean_crawled_train.csv', type=str,
+    parser.add_argument("--dev_data_path", default='./data/korean_single_dev.csv', type=str,
                         help="dev data path")
-    parser.add_argument("--num_label", default='binary', type=str,
-                        help="Number of labels in datastes(binary or multi)")
-    parser.add_argument("--max_len", default=50, type=int,
+    parser.add_argument("--max_len", default=64, type=int,
                         help="Maximum sequence length")
 
     args = parser.parse_args()
