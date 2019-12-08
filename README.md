@@ -11,18 +11,29 @@ HuggingFace transformer BERT Trainer
 
 
 Pretrained Korean Bert Model ([ETRI](http://aiopen.etri.re.kr/service_dataset.php) or [SKT](http://aiopen.etri.re.kr/service_dataset.php))  
-1. ETRI kobert  
-Make directory `pretrained_model/etri/` and put `berg_config.json`, `pytorch_model.bin`, `tokenization.py` and `vocab.korean.rawtext.list`  
-
-2. SKT kobert  
-Make directory `pretrained_model/skt/` and put `bert_config.json`, `pytorch_model.bin`, `tokenizer.model` and `vocab.json`  
-
+Make directory `pretrained_model` and make sub directory like below  
+```
+pretrained_model
+├── etri
+│   ├── bert_config.json
+│   ├── pytorch_model.bin
+│   ├── tokenization.py
+│   └── vocab.korean.rawtext.list
+└── skt
+    ├── bert_config.json
+    ├── pytorch_model.bin
+    ├── tokenizer.model
+    └── vocab.json
+```
 ## DATASETS  
 - [한국어 단발성 대화 데이터셋](http://aicompanion.or.kr/kor/tech/data.php)  
 - Any Dataset containing binary label(긍정, 부정)  
-Datasets should have two columns Sentence and Emotion.  
-or you can modify a few codes below which are in `datasets.py` to fit your own datasets  
+
+Datasets should be in csv format which has two columns named 'Sentence' and 'Emotion'.  
+Or you can modify a few codes below in `datasets.py` to fit your own datasets  
 ```python
+...
+# line 50 - 58
 def get_data(self, file_path):
     data = pd.read_csv(file_path)
     corpus = data['Sentence']
@@ -32,20 +43,31 @@ def get_data(self, file_path):
     except:
         pass
     return corpus, label
+...
 ```
 
 ## Usage  
 For maksed language model pretrain  
 ```
-$ python train_mlm.py
+$ python train_mlm.py\
+        --pretrained_type="etri"
 ```  
   
 For text classification  
 ```
-$ python train_classification.py
+$ python train_classification.py\
+        --pretrained_type="etri"
 ```  
+
+Classification after further MLM pretrain
+```
+$ python train_classification.py \
+        --pretrained_model_path=".../best_model.bin"
+```
   
 Use fp16 argument for [mixed precision training](https://github.com/NVIDIA/apex)  
 ```
-$ python train_classification.py --fp16
+$ python train_classification.py \
+        --fp16
+        --fp16_opt_level="O1"
 ```
