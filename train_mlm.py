@@ -65,34 +65,28 @@ class MLMBatchFunction:
 
     def make_masked_input(self, sample):
         masked_idcs = []
-        while(sum(masked_idcs) == 0):
-            
-            for i, token in enumerate(sample):
-                # sentence must have at least one mask
-                prob = random.random()
-                # mask token with 15%
-                if prob < 0.15:
-                    masked_idcs.append(1)
-                    prob /= 0.15
+        for i, token in enumerate(sample):
+            # sentence must have at least one mask
+            prob = random.random()
+            # mask token with 15%
+            if prob < 0.15:
+                masked_idcs.append(1)
+                prob /= 0.15
 
-                    # 80% randomly change token to mask token
-                    if prob < 0.8:
-                        sample[i] = self.mask_idx
+                # 80% randomly change token to mask token
+                if prob < 0.8:
+                    sample[i] = self.mask_idx
 
-                    # 10% randomly change token to random token
-                    elif prob < 0.9:
-                        special_tokens = [self.pad_idx, self.mask_idx, self.sep_idx, self.cls_idx]
+                # 10% randomly change token to random token
+                elif prob < 0.9:
+                    special_tokens = [self.pad_idx, self.mask_idx, self.sep_idx, self.cls_idx]
+                    r = random.choice(range(len(self.vocab)))
+                    while r in special_tokens:
                         r = random.choice(range(len(self.vocab)))
-                        while r in special_tokens:
-                            r = random.choice(range(len(self.vocab)))
-                        sample[i] = r
-                        # -> rest 10% randomly keep current token
-                else:
-                    masked_idcs.append(0)
-                    
-            if sum(masked_idcs) == 0:
-                # Repeat for loop if there is no mask token in the sequence
-                masked_idcs = []
+                    sample[i] = r
+                    # -> rest 10% randomly keep current token
+            else:
+                masked_idcs.append(0)
 
         return sample, masked_idcs
 
@@ -328,9 +322,9 @@ def main():
                         help="type of pretrained model (skt, etri)")
 
     # Train Parameters
-    parser.add_argument("--train_batch_size", default=100, type=int,
+    parser.add_argument("--train_batch_size", default=80, type=int,
                         help="batch size")
-    parser.add_argument("--eval_batch_size", default=100, type=int,
+    parser.add_argument("--eval_batch_size", default=80, type=int,
                         help="batch size for validation")
     parser.add_argument("--layerwise_decay", action="store_true",
                         help="Whether to use layerwise decay")
@@ -338,7 +332,7 @@ def main():
                         help="The initial learning rate for Adam")
     parser.add_argument("--epochs", default=25, type=int,
                         help="total epochs")
-    parser.add_argument("--gradient_accumulation_steps", default=5, type=int,
+    parser.add_argument("--gradient_accumulation_steps", default=6, type=int,
                         help="gradient accumulation steps for large batch training")
     parser.add_argument("--warmup_percent", default=0.1, type=float,
                         help="gradient warmup percentage")
