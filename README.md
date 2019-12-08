@@ -3,10 +3,10 @@ HuggingFace transformer BERT Trainer
 
 ## Usage  
 - for pretrain  
-```python train_mlm.py```  
+```$ python train_mlm.py```  
   
 - for classification  
-```python train_classification.py```  
+```$ python train_classification.py```  
   
-Use fp16 argument for mixed precision training  
-```python train_classification.py --fp16```
+- Use fp16 argument for mixed precision training  
+```$ python train_classification.py --fp16```
