@@ -113,7 +113,7 @@ def train(args):
     pretrained = torch.load(os.path.join(pretrained_path + '/pytorch_model.bin'))
 
     if args.pretrained_type == 'skt':
-        # skt model의 파라미터 이름이 달라 수정
+        # Change parameter name for consistency
         new_keys_ = ['bert.' + k for k in pretrained.keys()]
         old_values_ = pretrained.values()
         pretrained = {k: v for k, v in zip(new_keys_, old_values_)}
@@ -276,6 +276,7 @@ def train(args):
     results = {
         'val_loss': best_val_loss,
         'val_acc': best_val_acc,
+        'save_dir': save_path,
     }
     result_writer.update(args, **results)
     return global_step, train_loss, train_acc, best_val_loss, best_val_acc, total_result

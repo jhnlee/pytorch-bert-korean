@@ -73,10 +73,17 @@ def train(args):
 
     # Load pretrained model and model configuration
     pretrained_path = os.path.join('./pretrained_model/', args.pretrained_type)
-    pretrained = torch.load(os.path.join(pretrained_path + '/pytorch_model.bin'))
-
+    if args.pretrained_model_path is None:
+        # Use pretrained bert model(etri/skt)
+        pretrained_model_path = os.path.join(pretrained_path, 'pytorch_model.bin')
+    else:
+        # Use further-pretrained bert model
+        pretrained_model_path = args.pretrained_model_path
+    logger.info('Pretrain Model : {}'.format(pretrained_model_path))
+    pretrained = torch.load(pretrained_model_path)
+    
     if args.pretrained_type == 'skt':
-        # skt model의 파라미터 이름이 달라 수정
+        # Change parameter name for consistency
         new_keys_ = ['bert.' + k for k in pretrained.keys()]
         old_values_ = pretrained.values()
         pretrained = {k: v for k, v in zip(new_keys_, old_values_)}
@@ -227,17 +234,17 @@ def train(args):
                         confusion_matrix(y_train.tolist(), y_max.tolist())))
 
         train_loss /= (step + 1)
-        train_acc /= (step+1)
-        train_f1 /= (step+1)
+        train_acc /= (step + 1)
+        train_f1 /= (step + 1)
 
         # Validation
         val_loss, val_acc, val_macro_f1 = evaluate(args, dev_loader, model, device)
         
         train_result = '[{}/{}] tr loss : {:.3f}, tr acc : {:.3f}. tr macro f1 : {:.3f}'.format(
-            global_step + 1, t_total, train_loss, train_acc, train_f1
+            global_step, t_total, train_loss, train_acc, train_f1
         )
         val_result = '[{}/{}] val loss : {:.3f}, val acc : {:.3f}. val macro f1 : {:.3f}'.format(
-            global_step + 1, t_total, val_loss, val_acc, val_macro_f1
+            global_step, t_total, val_loss, val_acc, val_macro_f1
         )
 
         logger.info(train_result)
@@ -245,11 +252,11 @@ def train(args):
         total_result.append(val_result)
 
         writer.add_scalars('loss', {'train': train_loss,
-                                    'val': val_loss}, global_step + 1)
+                                    'val': val_loss}, global_step)
         writer.add_scalars('acc', {'train': train_acc,
-                                   'val': val_acc}, global_step + 1)
+                                   'val': val_acc}, global_step)
         writer.add_scalars('macro_f1', {'train': train_f1,
-                                        'val': val_macro_f1}, global_step + 1)
+                                        'val': val_macro_f1}, global_step)
 
         if val_loss < best_val_loss:
             # Save model checkpoints
@@ -258,6 +265,7 @@ def train(args):
             logger.info('Saving model checkpoint to %s', save_path)
             best_val_loss = val_loss
             best_val_acc = val_acc
+            best_val_macro_f1 = val_macro_f1
 
         train_loss, train_acc = 0, 0
 
@@ -265,6 +273,9 @@ def train(args):
     results = {
         'val_loss': best_val_loss,
         'val_acc': best_val_acc,
+        'val_macro_f1' : best_val_macro_f1,
+        'save_dir': save_path,
+        'pretrained_path': pretrained_path,
     }
     result_writer.update(args, **results)
     return global_step, train_loss, train_acc, best_val_loss, best_val_acc, total_result
@@ -309,7 +320,7 @@ def evaluate(args, dataloader, model, device, objective='classification'):
     if 'micro avg' not in dev_cr.keys():
         val_acc = list(dev_cr.items())[len(label_list)][1]
     else:
-        # batch 안에 존재하지 않는 label이 있는 경우 classification report가 다르게 나옴
+        # If at least one of labels does not exists in mini-batch, use micro average instead
         val_acc = dev_cr['micro avg']['f1-score']
     # macro f1
     val_macro_f1 = dev_cr['macro avg']['f1-score']
@@ -335,11 +346,13 @@ def main():
     # Pretrained model Parameters
     parser.add_argument("--pretrained_type", default='etri', type=str,
                         help="type of pretrained model (skt, etri)")
+    parser.add_argument("--pretrained_model_path", required=False,
+                        help="path of pretrained model (If you wnat to use further-pretrained model)")
 
     # Train Parameters
-    parser.add_argument("--train_batch_size", default=100, type=int,
+    parser.add_argument("--train_batch_size", default=32, type=int,
                         help="batch size")
-    parser.add_argument("--eval_batch_size", default=100, type=int,
+    parser.add_argument("--eval_batch_size", default=32, type=int,
                         help="batch size for validation")
     parser.add_argument("--layerwise_decay", action="store_true",
                         help="Whether to use layerwise decay")
@@ -368,13 +381,13 @@ def main():
                         help="Random seed(default=0)")
 
     # Data Parameters
-    parser.add_argument("--train_data_path", default='./data/korean_crawled_train.csv', type=str,
+    parser.add_argument("--train_data_path", default='./data/korean_single_train.csv', type=str,
                         help="train data path")
-    parser.add_argument("--dev_data_path", default='./data/korean_crawled_train.csv', type=str,
+    parser.add_argument("--dev_data_path", default='./data/korean_single_dev.csv', type=str,
                         help="dev data path")
-    parser.add_argument("--num_label", default='binary', type=str,
+    parser.add_argument("--num_label", default='multi', type=str,
                         help="Number of labels in datastes(binary or multi)")
-    parser.add_argument("--max_len", default=50, type=int,
+    parser.add_argument("--max_len", default=64, type=int,
                         help="Maximum sequence length")
 
     args = parser.parse_args()
