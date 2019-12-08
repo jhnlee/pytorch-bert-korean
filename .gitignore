@@ -5,3 +5,4 @@ __pycache__/
 model_saved_finetuning/
 model_saved_pretrain/
 .idea/
+.vscode/
