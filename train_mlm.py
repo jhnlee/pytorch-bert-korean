@@ -30,13 +30,13 @@ logger.setLevel(logging.INFO)
 
 class MLMBatchFunction:
     # batch function for pytorch dataloader
-    def __init__(self, max_len, vocab, pad_idx, cls_idx, sep_idx, mask_idx):
+    def __init__(self, max_len, vocab):
         self.max_len = max_len
         self.vocab = vocab
-        self.pad_idx = pad_idx
-        self.cls_idx = cls_idx
-        self.sep_idx = sep_idx
-        self.mask_idx = mask_idx
+        self.pad_idx = self.vocab['[PAD]']
+        self.cls_idx = self.vocab['[CLS]']
+        self.sep_idx = self.vocab['[SEP]']
+        self.mask_idx = self.vocab['[MASK]']
 
     def __call__(self, batch):
         tokens, label = list(zip(*batch))
@@ -45,19 +45,14 @@ class MLMBatchFunction:
         max_len = min(self.max_len, max([len(i) for i in tokens]))
 
         # Use unmasked tokens as vocab labels for MLM
-        masked_tokens, masked_idcs = list(
-            zip(*[self.make_masked_input(t) for t in copy.deepcopy(tokens)]))
-        masked_tokens = torch.tensor(
-            [self.pad([self.cls_idx] + t + [self.sep_idx], max_len) for t in masked_tokens])
-
-        masked_idcs = torch.tensor(
-            [self.pad([self.pad_idx] + t + [self.pad_idx], max_len) for t in masked_idcs])
-        label = torch.tensor(
-            [self.pad([-1] + t + [-1], max_len) for t in tokens])
+        masked_tokens, masked_idcs = list(zip(*[self.make_masked_input(t) for t in copy.deepcopy(tokens)]))
+        masked_tokens = torch.tensor([self.pad([self.cls_idx] + t + [self.sep_idx], max_len) for t in masked_tokens])
+        masked_idcs = torch.tensor([self.pad([self.pad_idx] + t + [self.pad_idx], max_len) for t in masked_idcs])
+        
+        label = torch.tensor([self.pad([-1] + t + [-1], max_len) for t in tokens])
         label = label.masked_fill(masked_idcs != 1, -1)
 
-        masks = torch.ones_like(masked_tokens).masked_fill(
-            masked_tokens == self.pad_idx, 0)
+        masks = torch.ones_like(masked_tokens).masked_fill(masked_tokens == self.pad_idx, 0)
 
         return masked_tokens, label, masks
 
@@ -71,8 +66,9 @@ class MLMBatchFunction:
 
     def make_masked_input(self, sample):
         masked_idcs = []
-        for i, token in enumerate(sample):
-            while(sum(masked_idcs) == 0):
+        while(sum(masked_idcs) == 0):
+            
+            for i, token in enumerate(sample):
                 # sentence must have at least one mask
                 prob = random.random()
                 # mask token with 15%
@@ -86,8 +82,7 @@ class MLMBatchFunction:
 
                     # 10% randomly change token to random token
                     elif prob < 0.9:
-                        special_tokens = [self.pad_idx,
-                                        self.mask_idx, self.sep_idx, self.cls_idx]
+                        special_tokens = [self.pad_idx, self.mask_idx, self.sep_idx, self.cls_idx]
                         r = random.choice(range(len(self.vocab)))
                         while r in special_tokens:
                             r = random.choice(range(len(self.vocab)))
@@ -96,8 +91,9 @@ class MLMBatchFunction:
                 else:
                     masked_idcs.append(0)
                     
-                if sum(masked_idcs) == 0:
-                    masked_idcs = []
+            if sum(masked_idcs) == 0:
+                # Repeat for loop if there is no mask token in the sequence
+                masked_idcs = []
 
         return sample, masked_idcs
 
@@ -106,8 +102,7 @@ def train(args):
     set_seed(args)
     # Set device
     if args.device == 'cuda':
-        device = torch.device(
-            'cuda') if torch.cuda.is_available() else torch.device('cpu')
+        device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
         logger.info('use cuda')
     else:
         device = torch.device('cpu')
@@ -115,8 +110,7 @@ def train(args):
 
     # Load pretrained model and model configuration
     pretrained_path = os.path.join('./pretrained_model/', args.pretrained_type)
-    pretrained = torch.load(os.path.join(
-        pretrained_path + '/pytorch_model.bin'))
+    pretrained = torch.load(os.path.join(pretrained_path + '/pytorch_model.bin'))
 
     if args.pretrained_type == 'skt':
         # skt model의 파라미터 이름이 달라 수정
@@ -124,8 +118,7 @@ def train(args):
         old_values_ = pretrained.values()
         pretrained = {k: v for k, v in zip(new_keys_, old_values_)}
 
-    bert_config = BertConfig(os.path.join(
-        pretrained_path + '/bert_config.json'))
+    bert_config = BertConfig(os.path.join(pretrained_path + '/bert_config.json'))
     model = BertForMLM(bert_config).to(device)
     model.load_state_dict(pretrained, strict=False)
 
@@ -133,9 +126,8 @@ def train(args):
     tr_set = Datasets(file_path=args.train_data_path,
                       pretrained_type=args.pretrained_type,
                       max_len=args.max_len)
-
-    collate_fn = MLMBatchFunction(
-        args.max_len, tr_set.vocab, tr_set.pad_idx, tr_set.cls_idx, tr_set.sep_idx, tr_set.mask_idx)
+    # Use custom batch function
+    collate_fn = MLMBatchFunction(args.max_len, tr_set.vocab)
     tr_loader = DataLoader(dataset=tr_set,
                            batch_size=args.train_batch_size,
                            shuffle=True,
@@ -147,7 +139,6 @@ def train(args):
     dev_set = Datasets(file_path=args.dev_data_path,
                        pretrained_type=args.pretrained_type,
                        max_len=args.max_len)
-
     dev_loader = DataLoader(dataset=dev_set,
                             batch_size=args.eval_batch_size,
                             num_workers=8,
@@ -156,16 +147,14 @@ def train(args):
                             collate_fn=collate_fn)
 
     # optimizer
-    optimizer = layerwise_decay_optimizer(
-        model=model, lr=args.learning_rate, layerwise_decay=args.layerwise_decay)
+    optimizer = layerwise_decay_optimizer(model=model, lr=args.learning_rate, layerwise_decay=args.layerwise_decay)
 
     # lr scheduler
-    t_total = len(tr_loader) // args.gradient_accumulation_steps * args.epochs
+    t_total = len(tr_loader) // args.gradient_accumulation_steps * args.epochs 
     warmup_steps = int(t_total * args.warmup_percent)
-    logger.info('total training steps : {}, lr warmup steps : {}'.format(
-        t_total, warmup_steps))
-    scheduler = optimization.WarmupCosineSchedule(
-        optimizer, warmup_steps=warmup_steps, t_total=t_total)
+    logger.info('total training steps : {}, lr warmup steps : {}'.format(t_total, warmup_steps))
+    # Use gradual warmup and cosine decay
+    scheduler = optimization.WarmupCosineSchedule(optimizer, warmup_steps=warmup_steps, t_total=t_total)
 
     # for low-precision training
     if args.fp16:
@@ -173,15 +162,13 @@ def train(args):
             from apex import amp
             logger.info('Use fp16')
         except ImportError:
-            raise ImportError(
-                "Please install apex from https://www.github.com/nvidia/apex to use fp16 training.")
-        model, optimizer = amp.initialize(
-            model, optimizer, opt_level=args.fp16_opt_level, verbosity=0)
+            raise ImportError("Please install apex from https://www.github.com/nvidia/apex to use fp16 training.")
+        model, optimizer = amp.initialize(model, optimizer, opt_level=args.fp16_opt_level, verbosity=0)
 
     # tensorboard setting
-    save_path = "./model_saved_pretrain/lr {}, batch {}, len{}, warmup {}, len {}, {}, epoch {}".format(
-        args.learning_rate, args.train_batch_size, args.warmup_percent,
-        args.gradient_accumulation_steps, args.max_len, args.pretrained_type, args.epochs)
+    save_path = "./model_saved_pretrain/lr {}, batch {}, total {}, warmup {}, len {}, {}".format(
+        args.learning_rate, args.train_batch_size * args.gradient_accumulation_steps,
+        t_total, args.warmup_percent, args.max_len, args.pretrained_type)
 
     if not os.path.isdir(save_path):
         os.makedirs(save_path)
@@ -212,8 +199,12 @@ def train(args):
             }
 
             output, loss = model(**inputs)
-            y_max = output[0].max(dim=1)[1]
-            batch_acc = (y_max == y_train).float().mean().item()
+            y_max = output.max(dim=2)[1]
+            
+            # Get accuracy for maked tokens
+            total_length = torch.ones_like(y_train).masked_fill(y_train == -1, 0).sum().item()
+            total_sum = torch.zeros_like(y_max).masked_fill(y_max == y_train, 1).sum().item()
+            batch_acc = total_sum / total_length
 
             # accumulate measures
             grad_accu = args.gradient_accumulation_steps
@@ -230,29 +221,25 @@ def train(args):
             train_loss += loss.item()
             train_acc += batch_acc
 
-            if (global_step + 1) % args.logging_step == 0:
-                logging_acc = (train_acc - logging_acc) / args.logging_step
-                logging_loss = (train_loss - logging_loss) / args.logging_step
-
-                logger.info('[{}/{}], trn loss : {:.3f}, trn acc : {:.3f}, lr : {:.3f}'.format(
-                    global_step +
-                    1, t_total, logging_loss, logging_acc, scheduler.get_lr()[0]
-                ))
-                logging_acc, logging_loss = train_acc, train_loss
-
             if (step + 1) % grad_accu == 0:
                 if args.fp16:
-                    torch.nn.utils.clip_grad_norm_(
-                        amp.master_params(optimizer), args.grad_clip_norm)
+                    torch.nn.utils.clip_grad_norm_(amp.master_params(optimizer), args.grad_clip_norm)
                 else:
-                    torch.nn.utils.clip_grad_norm_(
-                        model.parameters(), args.grad_clip_norm)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip_norm)
 
                 scheduler.step()
                 optimizer.step()
                 model.zero_grad()
                 global_step += 1
-                writer.add_scalars('lr', {'lr': scheduler.get_lr()[0]}, global_step + 1)
+                writer.add_scalars('lr', {'lr': scheduler.get_lr()[0]}, global_step)
+                
+                if global_step % args.logging_step == 0:
+                    logging_acc = (train_acc - logging_acc) / args.logging_step
+                    logging_loss = (train_loss - logging_loss) / args.logging_step
+                    logger.info('[{}/{}], trn loss : {:.3f}, trn acc : {:.3f}, lr : {:.3f}'.format(
+                        global_step, t_total, logging_loss, logging_acc, scheduler.get_lr()[0]
+                    ))
+                    logging_acc, logging_loss = train_acc, train_loss
 
         train_loss /= (step + 1)
         train_acc /= (step+1)
@@ -260,10 +247,10 @@ def train(args):
         # Validation
         val_loss, val_acc= evaluate(args, dev_loader, model, device)
         train_result = '[{}/{}] tr loss : {:.3f}, tr acc : {:.3f}'.format(
-            global_step + 1, t_total, train_loss, train_acc
+            global_step, t_total, train_loss, train_acc
         )
         val_result = '[{}/{}] val loss : {:.3f}, val acc : {:.3f}'.format(
-            global_step + 1, t_total, val_loss, val_acc
+            global_step, t_total, val_loss, val_acc
         )
 
         logger.info(train_result)
@@ -271,14 +258,13 @@ def train(args):
         total_result.append(val_result)
 
         writer.add_scalars('loss', {'train': train_loss,
-                                    'val': val_loss}, global_step + 1)
+                                    'val': val_loss}, global_step)
         writer.add_scalars('acc', {'train': train_acc,
-                                   'val': val_acc}, global_step + 1)
+                                   'val': val_acc}, global_step)
 
         if val_loss < best_val_loss:
             # Save model checkpoints
-            torch.save(model.state_dict(), os.path.join(
-                save_path, 'best_model.bin'))
+            torch.save(model.state_dict(), os.path.join(save_path, 'best_model.bin'))
             torch.save(args, os.path.join(save_path, 'training_args.bin'))
             logger.info('Saving model checkpoint to %s', save_path)
             best_val_loss = val_loss
@@ -314,14 +300,17 @@ def evaluate(args, dataloader, model, device, objective='classification'):
         }
         with torch.no_grad():
             output, loss = model(**inputs)
-            y_max = output[0].max(dim=1)[1]
+            y_max = output.max(dim=2)[1]
             total_y_hat += y_max.tolist()
-
             val_loss += loss.item()
-
-    val_acc = (total_y_hat == total_y).float().mean().item()
+    
+    # Make lists unnested and get accuracy for masked tokens
+    total_y, total_y_hat = [torch.tensor([x for sublist in y for x in sublist]) for y in (total_y, total_y_hat)]
+    total_length = torch.ones_like(total_y).masked_fill(total_y == -1, 0).sum().item()
+    total_sum = torch.zeros_like(total_y_hat).masked_fill(total_y_hat == total_y, 1).sum().item()
+    
+    val_acc = total_sum / total_length
     val_loss /= (val_step + 1)
-
     return val_loss, val_acc
 
 
@@ -339,17 +328,17 @@ def main():
                         help="type of pretrained model (skt, etri)")
 
     # Train Parameters
-    parser.add_argument("--train_batch_size", default=128, type=int,
+    parser.add_argument("--train_batch_size", default=100, type=int,
                         help="batch size")
-    parser.add_argument("--eval_batch_size", default=128, type=int,
+    parser.add_argument("--eval_batch_size", default=100, type=int,
                         help="batch size for validation")
     parser.add_argument("--layerwise_decay", action="store_true",
                         help="Whether to use layerwise decay")
     parser.add_argument("--learning_rate", default=2e-4, type=float,
                         help="The initial learning rate for Adam")
-    parser.add_argument("--epochs", default=5, type=int,
+    parser.add_argument("--epochs", default=25, type=int,
                         help="total epochs")
-    parser.add_argument("--gradient_accumulation_steps", default=1, type=int,
+    parser.add_argument("--gradient_accumulation_steps", default=5, type=int,
                         help="gradient accumulation steps for large batch training")
     parser.add_argument("--warmup_percent", default=0.1, type=float,
                         help="gradient warmup percentage")
@@ -357,13 +346,13 @@ def main():
                         help="batch size")
 
     # Other Parameters
-    parser.add_argument("--logging_step", default=1000, type=int,
+    parser.add_argument("--logging_step", default=20, type=int,
                         help="logging step for training loss and acc")
     parser.add_argument("--device", default='cuda', type=str,
                         help="Whether to use cpu or cuda")
     parser.add_argument("--fp16", action="store_true",
                         help="Whether to use nvidia mixed precision training")
-    parser.add_argument('--fp16_opt_level', type=str, default='O1',
+    parser.add_argument('--fp16_opt_level', type=str, default='O2',
                         help="For fp16: Apex AMP optimization level selected in ['O0', 'O1', 'O2', and 'O3']."
                         "See details at https://nvidia.github.io/apex/amp.html")
     parser.add_argument("--seed", default=0, type=int,
@@ -374,15 +363,14 @@ def main():
                         help="train data path")
     parser.add_argument("--dev_data_path", default='./data/korean_single_dev.csv', type=str,
                         help="dev data path")
-    parser.add_argument("--max_len", default=64, type=int,
+    parser.add_argument("--max_len", default=50, type=int,
                         help="Maximum sequence length")
 
     args = parser.parse_args()
     set_seed(args)
 
     t = time.time()
-    global_step, train_loss, train_acc, best_val_loss, best_val_acc, total_result = train(
-        args)
+    global_step, train_loss, train_acc, best_val_loss, best_val_acc, total_result = train(args)
     elapsed = time.time() - t
 
     logger.info('***** Training done *****')

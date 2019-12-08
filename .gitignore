@@ -2,5 +2,6 @@ data/
 pretrained_model/
 train.py
 __pycache__/
-model_saved/
-fp16 test/
+model_saved_finetuning/
+model_saved_pretrain/
+.idea/

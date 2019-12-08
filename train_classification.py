@@ -40,10 +40,8 @@ class ClassificationBatchFunction:
 
         # Get max length from batch
         max_len = min(self.max_len, max([len(i) for i in tokens]))
-        tokens = torch.tensor(
-            [self.pad([self.cls_idx] + t + [self.sep_idx], max_len) for t in tokens])
-        masks = torch.ones_like(tokens).masked_fill(
-            tokens == self.pad_idx, 0)
+        tokens = torch.tensor([self.pad([self.cls_idx] + t + [self.sep_idx], max_len) for t in tokens])
+        masks = torch.ones_like(tokens).masked_fill(tokens == self.pad_idx, 0)
 
         return tokens, masks, torch.tensor(label)
 
@@ -60,8 +58,7 @@ def train(args):
     set_seed(args)
     # Set device
     if args.device == 'cuda':
-        device = torch.device(
-            'cuda') if torch.cuda.is_available() else torch.device('cpu')
+        device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
         logger.info('use cuda')
     else:
         device = torch.device('cpu')
@@ -76,8 +73,7 @@ def train(args):
 
     # Load pretrained model and model configuration
     pretrained_path = os.path.join('./pretrained_model/', args.pretrained_type)
-    pretrained = torch.load(os.path.join(
-        pretrained_path + '/pytorch_model.bin'))
+    pretrained = torch.load(os.path.join(pretrained_path + '/pytorch_model.bin'))
 
     if args.pretrained_type == 'skt':
         # skt model의 파라미터 이름이 달라 수정
@@ -85,8 +81,7 @@ def train(args):
         old_values_ = pretrained.values()
         pretrained = {k: v for k, v in zip(new_keys_, old_values_)}
 
-    bert_config = BertConfig(os.path.join(
-        pretrained_path + '/bert_config.json'))
+    bert_config = BertConfig(os.path.join(pretrained_path + '/bert_config.json'))
     bert_config.num_labels = len(label_list)
     model = BertForEmotionClassification(bert_config).to(device)
     model.load_state_dict(pretrained, strict=False)
@@ -96,9 +91,8 @@ def train(args):
                       label_list=label_list,
                       pretrained_type=args.pretrained_type,
                       max_len=args.max_len)
-
-    collate_fn = ClassificationBatchFunction(
-        args.max_len, tr_set.pad_idx, tr_set.cls_idx, tr_set.sep_idx)
+    # Use custom batch function
+    collate_fn = ClassificationBatchFunction(args.max_len, tr_set.pad_idx, tr_set.cls_idx, tr_set.sep_idx)
     tr_loader = DataLoader(dataset=tr_set,
                            batch_size=args.train_batch_size,
                            shuffle=True,
@@ -111,7 +105,6 @@ def train(args):
                        label_list=label_list,
                        pretrained_type=args.pretrained_type,
                        max_len=args.max_len)
-
     dev_loader = DataLoader(dataset=dev_set,
                             batch_size=args.eval_batch_size,
                             num_workers=8,
@@ -120,16 +113,14 @@ def train(args):
                             collate_fn=collate_fn)
 
     # optimizer
-    optimizer = layerwise_decay_optimizer(
-        model=model, lr=args.learning_rate, layerwise_decay=args.layerwise_decay)
+    optimizer = layerwise_decay_optimizer(model=model, lr=args.learning_rate, layerwise_decay=args.layerwise_decay)
 
     # lr scheduler
-    t_total = len(tr_loader) // args.gradient_accumulation_steps * args.epochs
+    t_total = len(tr_loader) // args.gradient_accumulation_steps * args.epochs 
     warmup_steps = int(t_total * args.warmup_percent)
-    logger.info('total training steps : {}, lr warmup steps : {}'.format(
-        t_total, warmup_steps))
-    scheduler = optimization.WarmupLinearSchedule(
-        optimizer, warmup_steps=warmup_steps, t_total=t_total)
+    logger.info('total training steps : {}, lr warmup steps : {}'.format(t_total, warmup_steps))
+    # Use gradual warmup and linear decay
+    scheduler = optimization.WarmupLinearSchedule(optimizer, warmup_steps=warmup_steps, t_total=t_total)
 
     # for low-precision training
     if args.fp16:
@@ -137,15 +128,14 @@ def train(args):
             from apex import amp
             logger.info('Use fp16')
         except ImportError:
-            raise ImportError(
-                "Please install apex from https://www.github.com/nvidia/apex to use fp16 training.")
+            raise ImportError("Please install apex from https://www.github.com/nvidia/apex to use fp16 training.")
         model, optimizer = amp.initialize(
             model, optimizer, opt_level=args.fp16_opt_level, verbosity=0)
 
     # tensorboard setting
-    save_path = "./model_saved_finetuning/lr {}, batch {}, len{}, warmup {}, len {}, {}, epoch {}".format(
-        args.learning_rate, args.train_batch_size, args.warmup_percent,
-        args.gradient_accumulation_steps, args.max_len, args.pretrained_type, args.epochs)
+    save_path = "./model_saved_finetuning/lr {}, batch {}, total{}, warmup {}, len {}, {}".format(
+        args.learning_rate, args.train_batch_size * args.gradient_accumulation_steps, t_total,
+        args.warmup_percent, args.max_len, args.pretrained_type)
 
     if not os.path.isdir(save_path):
         os.makedirs(save_path)
@@ -187,7 +177,7 @@ def train(args):
             if 'micro avg' not in cr.keys():
                 batch_acc = list(cr.items())[len(label_list)][1]
             else:
-                # batch 안에 존재하지 않는 label이 있는 경우 average 대신 micro avg로 나옴
+                # If at least one of labels does not exists in mini-batch, use micro average instead
                 batch_acc = cr['micro avg']['f1-score']
             # macro f1
             batch_macro_f1 = cr['macro avg']['f1-score']
@@ -209,46 +199,40 @@ def train(args):
             train_acc += batch_acc
             train_f1 += batch_macro_f1
 
-            if (global_step + 1) % args.logging_step == 0:
-                logging_acc = (train_acc - logging_acc) / args.logging_step
-                logging_f1 = (train_f1 - logging_f1) / args.logging_step
-                logging_loss = (train_loss - logging_loss) / args.logging_step
-
-                logger.info('[{}/{}], trn loss : {:.3f}, trn acc : {:.3f}, macro f1 : {:.3f}, lr : {:.3f}'.format(
-                    global_step +
-                    1, t_total, logging_loss, logging_acc, logging_f1, scheduler.get_lr()[
-                        0]
-                ))
-                logging_acc, logging_f1, logging_loss = train_acc, train_f1, train_loss
-
-                # Get f1 score for each label
-                f1_results = [(l, r['f1-score']) for i, (l, r)
-                              in enumerate(cr.items()) if i < len(label_list)]
-                f1_log = "\n".join(["{} : {}".format(l, f)
-                                    for l, f in f1_results])
-                logger.info("\n\n***f1-score***\n" + f1_log + "\n\n***confusion matrix***\n{}".format(
-                    confusion_matrix(y_train.tolist(), y_max.tolist())))
-
             if (step + 1) % grad_accu == 0:
                 if args.fp16:
-                    torch.nn.utils.clip_grad_norm_(
-                        amp.master_params(optimizer), args.grad_clip_norm)
+                    torch.nn.utils.clip_grad_norm_(amp.master_params(optimizer), args.grad_clip_norm)
                 else:
-                    torch.nn.utils.clip_grad_norm_(
-                        model.parameters(), args.grad_clip_norm)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip_norm)
 
                 scheduler.step()
                 optimizer.step()
                 model.zero_grad()
                 global_step += 1
+                
+                if global_step % args.logging_step == 0:
+                    logging_acc = (train_acc - logging_acc) / args.logging_step
+                    logging_f1 = (train_f1 - logging_f1) / args.logging_step
+                    logging_loss = (train_loss - logging_loss) / args.logging_step
+
+                    logger.info('[{}/{}], trn loss : {:.3f}, trn acc : {:.3f}, macro f1 : {:.3f}, lr : {:.3f}'.format(
+                        global_step, t_total, logging_loss, logging_acc, logging_f1, scheduler.get_lr()[0]
+                    ))
+                    logging_acc, logging_f1, logging_loss = train_acc, train_f1, train_loss
+
+                    # Get f1 score for each label
+                    f1_results = [(l, r['f1-score']) for i, (l, r) in enumerate(cr.items()) if i < len(label_list)]
+                    f1_log = "\n".join(["{} : {}".format(l, f) for l, f in f1_results])
+                    logger.info("\n\n***f1-score***\n" + f1_log + "\n\n***confusion matrix***\n{}".format(
+                        confusion_matrix(y_train.tolist(), y_max.tolist())))
 
         train_loss /= (step + 1)
         train_acc /= (step+1)
         train_f1 /= (step+1)
 
         # Validation
-        val_loss, val_acc, val_macro_f1 = evaluate(
-            args, dev_loader, model, device)
+        val_loss, val_acc, val_macro_f1 = evaluate(args, dev_loader, model, device)
+        
         train_result = '[{}/{}] tr loss : {:.3f}, tr acc : {:.3f}. tr macro f1 : {:.3f}'.format(
             global_step + 1, t_total, train_loss, train_acc, train_f1
         )
@@ -269,8 +253,7 @@ def train(args):
 
         if val_loss < best_val_loss:
             # Save model checkpoints
-            torch.save(model.state_dict(), os.path.join(
-                save_path, 'best_model.bin'))
+            torch.save(model.state_dict(), os.path.join(save_path, 'best_model.bin'))
             torch.save(args, os.path.join(save_path, 'training_args.bin'))
             logger.info('Saving model checkpoint to %s', save_path)
             best_val_loss = val_loss
@@ -313,7 +296,6 @@ def evaluate(args, dataloader, model, device, objective='classification'):
             output, loss = model(**inputs)
             y_max = output.max(dim=1)[1]
             total_y_hat += y_max.tolist()
-
             val_loss += loss.item()
 
     # f1-score 계산
@@ -333,14 +315,11 @@ def evaluate(args, dataloader, model, device, objective='classification'):
     val_macro_f1 = dev_cr['macro avg']['f1-score']
 
     logger.info('***** Evaluation Results *****')
-    f1_results = [(l, r['f1-score']) for i, (l, r)
-                  in enumerate(dev_cr.items()) if i < len(label_list)]
+    f1_results = [(l, r['f1-score']) for i, (l, r) in enumerate(dev_cr.items()) if i < len(label_list)]
     f1_log = "\n".join(["{} : {}".format(l, f) for l, f in f1_results])
-    logger.info("\n***f1-score***\n" + f1_log + "\n***confusion matrix***\n{}".format(
-        confusion_matrix(total_y, total_y_hat)))
+    logger.info("\n***f1-score***\n" + f1_log + "\n***confusion matrix***\n{}".format(confusion_matrix(total_y, total_y_hat)))
 
     val_loss /= (val_step + 1)
-
     return val_loss, val_acc, val_macro_f1
 
 
@@ -402,8 +381,7 @@ def main():
     set_seed(args)
 
     t = time.time()
-    global_step, train_loss, train_acc, best_val_loss, best_val_acc, total_result = train(
-        args)
+    global_step, train_loss, train_acc, best_val_loss, best_val_acc, total_result = train(args)
     elapsed = time.time() - t
 
     logger.info('***** Training done *****')
