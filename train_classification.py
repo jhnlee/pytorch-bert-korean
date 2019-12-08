@@ -14,7 +14,6 @@ from sklearn.metrics import classification_report, confusion_matrix
 from tqdm import tqdm
 import time
 import pickle
-import config
 import utils
 import logging
 import argparse

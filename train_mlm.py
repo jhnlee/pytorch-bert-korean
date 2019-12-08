@@ -14,7 +14,6 @@ from sklearn.metrics import classification_report, confusion_matrix
 from tqdm import tqdm
 import time
 import pickle
-import config
 import utils
 import logging
 import argparse
@@ -335,7 +334,7 @@ def main():
                         help="batch size for validation")
     parser.add_argument("--layerwise_decay", action="store_true",
                         help="Whether to use layerwise decay")
-    parser.add_argument("--learning_rate", default=2e-4, type=float,
+    parser.add_argument("--learning_rate", default=1e-5, type=float,
                         help="The initial learning rate for Adam")
     parser.add_argument("--epochs", default=25, type=int,
                         help="total epochs")
@@ -360,11 +359,11 @@ def main():
                         help="Random seed(default=0)")
 
     # Data Parameters
-    parser.add_argument("--train_data_path", default='./data/korean_single_train.csv', type=str,
+    parser.add_argument("--train_data_path", default='./data/korean_crawled_train.csv', type=str,
                         help="train data path")
-    parser.add_argument("--dev_data_path", default='./data/korean_single_dev.csv', type=str,
+    parser.add_argument("--dev_data_path", default='./data/korean_crawled_dev.csv', type=str,
                         help="dev data path")
-    parser.add_argument("--max_len", default=50, type=int,
+    parser.add_argument("--max_len", default=64, type=int,
                         help="Maximum sequence length")
 
     args = parser.parse_args()
