@@ -1,5 +1,5 @@
 # Pytorch BERT Pretrain / Finetuning  
-HuggingFace transformer BERT Trainer    
+pytorch BERT Trainer using HuggingFace transformers   
 
 ## Requirements
 - python 3.6   
@@ -25,8 +25,8 @@ pretrained_model
     ├── tokenizer.model
     └── vocab.json
 ```
-## DATASETS  
-- [한국어 단발성 대화 데이터셋](http://aicompanion.or.kr/kor/tech/data.php)  
+## Datasets  
+- [한국어 단발성 대화 데이터셋](http://aicompanion.or.kr/kor/tech/data.php)(공포, 놀람, 분노, 슬픔, 중립, 행복, 혐오)  
 - Any Dataset containing binary label(긍정, 부정)  
 
 Datasets should be in csv format which has two columns named 'Sentence' and 'Emotion'.  
@@ -61,13 +61,13 @@ $ python train_classification.py\
 
 Classification after further MLM pretrain
 ```
-$ python train_classification.py \
+$ python train_classification.py\
         --pretrained_model_path=".../best_model.bin"
 ```
   
 Use fp16 argument for [mixed precision training](https://github.com/NVIDIA/apex)  
 ```
-$ python train_classification.py \
-        --fp16
+$ python train_classification.py\
+        --fp16\
         --fp16_opt_level="O1"
 ```

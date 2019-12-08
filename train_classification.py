@@ -135,8 +135,7 @@ def train(args):
             logger.info('Use fp16')
         except ImportError:
             raise ImportError("Please install apex from https://www.github.com/nvidia/apex to use fp16 training.")
-        model, optimizer = amp.initialize(
-            model, optimizer, opt_level=args.fp16_opt_level, verbosity=0)
+        model, optimizer = amp.initialize(model, optimizer, opt_level=args.fp16_opt_level, verbosity=0)
 
     # tensorboard setting
     save_path = "./model_saved_finetuning/lr {}, batch {}, total{}, warmup {}, len {}, {}".format(
@@ -232,9 +231,9 @@ def train(args):
                     logger.info("\n\n***f1-score***\n" + f1_log + "\n\n***confusion matrix***\n{}".format(
                         confusion_matrix(y_train.tolist(), y_max.tolist())))
 
-        train_loss /= (step + 1)
-        train_acc /= (step + 1)
-        train_f1 /= (step + 1)
+        train_loss /= (step + 1) // grad_accu
+        train_acc /= (step + 1) // grad_accu
+        train_f1 /= (step + 1) // grad_accu
 
         # Validation
         val_loss, val_acc, val_macro_f1 = evaluate(args, dev_loader, model, device)

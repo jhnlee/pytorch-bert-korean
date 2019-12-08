@@ -234,8 +234,8 @@ def train(args):
                     ))
                     logging_acc, logging_loss = train_acc, train_loss
 
-        train_loss /= (step + 1)
-        train_acc /= (step+1)
+        train_loss /= (step + 1) // grad_accu
+        train_acc /= (step + 1) // grad_accu
 
         # Validation
         val_loss, val_acc= evaluate(args, dev_loader, model, device)
@@ -340,7 +340,7 @@ def main():
                         help="batch size")
 
     # Other Parameters
-    parser.add_argument("--logging_step", default=20, type=int,
+    parser.add_argument("--logging_step", default=1000, type=int,
                         help="logging step for training loss and acc")
     parser.add_argument("--device", default='cuda', type=str,
                         help="Whether to use cpu or cuda")
