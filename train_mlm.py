@@ -103,7 +103,14 @@ def train(args):
 
     # Load pretrained model and model configuration
     pretrained_path = os.path.join('./pretrained_model/', args.pretrained_type)
-    pretrained = torch.load(os.path.join(pretrained_path + '/pytorch_model.bin'))
+    if args.pretrained_model_path is None:
+        # Use pretrained bert model(etri/skt)
+        pretrained_model_path = os.path.join(pretrained_path, 'pytorch_model.bin')
+    else:
+        # Use further-pretrained bert model
+        pretrained_model_path = args.pretrained_model_path
+    logger.info('Pretrain Model : {}'.format(pretrained_model_path))
+    pretrained = torch.load(pretrained_model_path)
 
     if args.pretrained_type == 'skt':
         # Change parameter name for consistency
@@ -129,15 +136,16 @@ def train(args):
                            drop_last=True,
                            collate_fn=collate_fn)
 
-    dev_set = Datasets(file_path=args.dev_data_path,
-                       pretrained_type=args.pretrained_type,
-                       max_len=args.max_len)
-    dev_loader = DataLoader(dataset=dev_set,
-                            batch_size=args.eval_batch_size,
-                            num_workers=8,
-                            pin_memory=True,
-                            drop_last=False,
-                            collate_fn=collate_fn)
+    if args.do_eval:
+        dev_set = Datasets(file_path=args.dev_data_path,
+                        pretrained_type=args.pretrained_type,
+                        max_len=args.max_len)
+        dev_loader = DataLoader(dataset=dev_set,
+                                batch_size=args.eval_batch_size,
+                                num_workers=8,
+                                pin_memory=True,
+                                drop_last=False,
+                                collate_fn=collate_fn)
 
     # optimizer
     optimizer = layerwise_decay_optimizer(model=model, lr=args.learning_rate, layerwise_decay=args.layerwise_decay)
@@ -172,6 +180,7 @@ def train(args):
     model.zero_grad()
 
     best_val_loss = 1e+9
+    best_val_acc = 0
     global_step = 0
 
     logger.info('***** Training starts *****')
@@ -180,6 +189,7 @@ def train(args):
 
         train_loss, train_acc = 0, 0
         logging_loss, logging_acc = 0, 0
+        val_loss, val_acc = 0, 0
 
         for step, batch in tqdm(enumerate(tr_loader), desc='steps', total=len(tr_loader)):
             model.train()
@@ -224,38 +234,43 @@ def train(args):
                 optimizer.step()
                 model.zero_grad()
                 global_step += 1
-                writer.add_scalars('lr', {'lr': scheduler.get_lr()[0]}, global_step)
                 
                 if global_step % args.logging_step == 0:
                     logging_acc = (train_acc - logging_acc) / args.logging_step
                     logging_loss = (train_loss - logging_loss) / args.logging_step
+                    writer.add_scalars('loss', {'train': logging_loss}, global_step)
+                    writer.add_scalars('acc', {'train': logging_acc}, global_step)
+                    writer.add_scalars('lr', {'lr': scheduler.get_lr()[0]}, global_step)
+                    
                     logger.info('[{}/{}], trn loss : {:.3f}, trn acc : {:.3f}, lr : {:.3f}'.format(
                         global_step, t_total, logging_loss, logging_acc, scheduler.get_lr()[0]
                     ))
+                    
                     logging_acc, logging_loss = train_acc, train_loss
 
         train_loss /= (step + 1) // grad_accu
         train_acc /= (step + 1) // grad_accu
-
-        # Validation
-        val_loss, val_acc= evaluate(args, dev_loader, model, device)
+        
         train_result = '[{}/{}] tr loss : {:.3f}, tr acc : {:.3f}'.format(
             global_step, t_total, train_loss, train_acc
         )
-        val_result = '[{}/{}] val loss : {:.3f}, val acc : {:.3f}'.format(
-            global_step, t_total, val_loss, val_acc
-        )
-
         logger.info(train_result)
-        logger.info(val_result)
-        total_result.append(val_result)
+        
+        if args.do_eval:
+            # Validation
+            val_loss, val_acc= evaluate(args, dev_loader, model, device)
+            val_result = '[{}/{}] val loss : {:.3f}, val acc : {:.3f}'.format(
+                global_step, t_total, val_loss, val_acc
+            )
+            logger.info(val_result)
+            total_result.append(val_result)
 
         writer.add_scalars('loss', {'train': train_loss,
                                     'val': val_loss}, global_step)
         writer.add_scalars('acc', {'train': train_acc,
                                    'val': val_acc}, global_step)
 
-        if val_loss < best_val_loss:
+        if args.do_eval and val_loss < best_val_loss:
             # Save model checkpoints
             torch.save(model.state_dict(), os.path.join(save_path, 'best_model.bin'))
             torch.save(args, os.path.join(save_path, 'training_args.bin'))
@@ -263,6 +278,9 @@ def train(args):
             best_val_loss = val_loss
             best_val_acc = val_acc
 
+        if (epoch + 1) % args.saving_step == 0:
+            torch.save(model.state_dict(), os.path.join(save_path, 'epoch{}_model.bin'.format(epoch+1)))
+        
         train_loss, train_acc = 0, 0
 
     # Save results in 'model_saved_pretrain/results.csv'
@@ -275,7 +293,7 @@ def train(args):
     return global_step, train_loss, train_acc, best_val_loss, best_val_acc, total_result
 
 
-def evaluate(args, dataloader, model, device, objective='classification'):
+def evaluate(args, dataloader, model, device):
 
     val_loss, val_acc, val_f1 = 0, 0, 0
     total_y = []
@@ -320,6 +338,8 @@ def main():
     # Pretrained model Parameters
     parser.add_argument("--pretrained_type", default='etri', type=str,
                         help="type of pretrained model (skt, etri)")
+    parser.add_argument("--pretrained_model_path", required=False,
+                        help="path of pretrained model (If you wnat to use further-pretrained model)")
 
     # Train Parameters
     parser.add_argument("--train_batch_size", default=80, type=int,
@@ -330,7 +350,7 @@ def main():
                         help="Whether to use layerwise decay")
     parser.add_argument("--learning_rate", default=1e-5, type=float,
                         help="The initial learning rate for Adam")
-    parser.add_argument("--epochs", default=25, type=int,
+    parser.add_argument("--epochs", default=20, type=int,
                         help="total epochs")
     parser.add_argument("--gradient_accumulation_steps", default=6, type=int,
                         help="gradient accumulation steps for large batch training")
@@ -340,8 +360,12 @@ def main():
                         help="batch size")
 
     # Other Parameters
-    parser.add_argument("--logging_step", default=1000, type=int,
+    parser.add_argument("--logging_step", default=25, type=int,
                         help="logging step for training loss and acc")
+    parser.add_argument("--saving_step", default=5, type=int,
+                        help="epoch for saving temporarily")
+    parser.add_argument("--do_eval", action="store_true",
+                        help="do evaluation step for maked language model")
     parser.add_argument("--device", default='cuda', type=str,
                         help="Whether to use cpu or cuda")
     parser.add_argument("--fp16", action="store_true",
@@ -353,7 +377,7 @@ def main():
                         help="Random seed(default=0)")
 
     # Data Parameters
-    parser.add_argument("--train_data_path", default='./data/korean_crawled_train.csv', type=str,
+    parser.add_argument("--train_data_path", default='./data/korean_crawled_train_dev.csv', type=str,
                         help="train data path")
     parser.add_argument("--dev_data_path", default='./data/korean_crawled_dev.csv', type=str,
                         help="dev data path")
