@@ -45,20 +45,20 @@ class MLMBatchFunction:
 
         # Use unmasked tokens as vocab labels for MLM
         masked_tokens, masked_idcs = list(zip(*[self.make_masked_input(t) for t in copy.deepcopy(tokens)]))
-        masked_tokens = torch.tensor([self.pad([self.cls_idx] + t + [self.sep_idx], max_len) for t in masked_tokens])
-        masked_idcs = torch.tensor([self.pad([self.pad_idx] + t + [self.pad_idx], max_len) for t in masked_idcs])
+        masked_tokens = torch.tensor([self.pad([self.cls_idx] + t + [self.sep_idx], max_len, self.pad_idx) for t in masked_tokens])
+        masked_idcs = torch.tensor([self.pad([self.pad_idx] + t + [self.pad_idx], max_len, 0) for t in masked_idcs])
         
-        label = torch.tensor([self.pad([-1] + t + [-1], max_len) for t in tokens])
+        label = torch.tensor([self.pad([-1] + t + [-1], max_len, -1) for t in tokens])
         label = label.masked_fill(masked_idcs != 1, -1)
 
         masks = torch.ones_like(masked_tokens).masked_fill(masked_tokens == self.pad_idx, 0)
 
         return masked_tokens, label, masks
 
-    def pad(self, sample, max_len):
+    def pad(self, sample, max_len, pad):
         diff = max_len - len(sample)
         if diff > 0:
-            sample += [self.pad_idx] * diff
+            sample += [pad] * diff
         else:
             sample = sample[-max_len:]
         return sample
@@ -89,8 +89,32 @@ class MLMBatchFunction:
                 masked_idcs.append(0)
 
         return sample, masked_idcs
+'''
+dd = Datasets('./data/korean_crawled_dev.csv', pretrained_type='skt')
+from torch.utils.data import DataLoader
+ddd = DataLoader(dd, collate_fn=MLMBatchFunction(64, dd.vocab), batch_size=2)
+for i, batch in enumerate(ddd):
+    if i>0:
+        break
+dd.vocab
+batch
+batch[0][0]
+idx2vocab = {v:k for k, v in dd.vocab.items()}
+[idx2vocab[i] for i in batch[0][2].tolist()]
 
+dd = Datasets('./data/korean_crawled_dev.csv', pretrained_type='etri')
+from torch.utils.data import DataLoader
+ddd = DataLoader(dd, collate_fn=MLMBatchFunction(64, dd.vocab), batch_size=2)
+for i, batch in enumerate(ddd):
+    if i>0:
+        break
+batch
+dd.vocab
 
+batch[0][0]
+idx2vocab = {v:k for k, v in dd.vocab.items()}
+[idx2vocab[i] for i in batch[0][2].tolist()]
+'''
 def train(args):
     set_seed(args)
     # Set device
@@ -155,7 +179,7 @@ def train(args):
     warmup_steps = int(t_total * args.warmup_percent)
     logger.info('total training steps : {}, lr warmup steps : {}'.format(t_total, warmup_steps))
     # Use gradual warmup and cosine decay
-    scheduler = optimization.WarmupCosineSchedule(optimizer, warmup_steps=warmup_steps, t_total=t_total)
+    scheduler = optimization.WarmupCosineWithHardRestartsSchedule(optimizer, warmup_steps=warmup_steps, t_total=t_total)
 
     # for low-precision training
     if args.fp16:
@@ -182,15 +206,14 @@ def train(args):
     best_val_loss = 1e+9
     best_val_acc = 0
     global_step = 0
+    
+    train_loss, train_acc = 0, 0
+    val_loss, val_acc = 0, 0
+    logging_loss, logging_acc = 0, 0
 
     logger.info('***** Training starts *****')
     total_result = []
     for epoch in tqdm(range(args.epochs), desc='epochs'):
-
-        train_loss, train_acc = 0, 0
-        logging_loss, logging_acc = 0, 0
-        val_loss, val_acc = 0, 0
-
         for step, batch in tqdm(enumerate(tr_loader), desc='steps', total=len(tr_loader)):
             model.train()
             x_train, y_train, mask_train = map(lambda x: x.to(device), batch)
@@ -223,7 +246,6 @@ def train(args):
 
             train_loss += loss.item()
             train_acc += batch_acc
-
             if (step + 1) % grad_accu == 0:
                 if args.fp16:
                     torch.nn.utils.clip_grad_norm_(amp.master_params(optimizer), args.grad_clip_norm)
@@ -236,25 +258,17 @@ def train(args):
                 global_step += 1
                 
                 if global_step % args.logging_step == 0:
-                    logging_acc = (train_acc - logging_acc) / args.logging_step
-                    logging_loss = (train_loss - logging_loss) / args.logging_step
-                    writer.add_scalars('loss', {'train': logging_loss}, global_step)
-                    writer.add_scalars('acc', {'train': logging_acc}, global_step)
+                    acc_ = (train_acc - logging_acc) / args.logging_step
+                    loss_ = (train_loss - logging_loss) / args.logging_step
+                    writer.add_scalars('loss', {'train': loss_}, global_step)
+                    writer.add_scalars('acc', {'train': acc_}, global_step)
                     writer.add_scalars('lr', {'lr': scheduler.get_lr()[0]}, global_step)
                     
-                    logger.info('[{}/{}], trn loss : {:.3f}, trn acc : {:.3f}, lr : {:.3f}'.format(
-                        global_step, t_total, logging_loss, logging_acc, scheduler.get_lr()[0]
+                    logger.info('[{}/{}], trn loss : {:.3f}, trn acc : {:.3f}'.format(
+                        global_step, t_total, loss_, acc_
                     ))
                     
                     logging_acc, logging_loss = train_acc, train_loss
-
-        train_loss /= (step + 1) // grad_accu
-        train_acc /= (step + 1) // grad_accu
-        
-        train_result = '[{}/{}] tr loss : {:.3f}, tr acc : {:.3f}'.format(
-            global_step, t_total, train_loss, train_acc
-        )
-        logger.info(train_result)
         
         if args.do_eval:
             # Validation
@@ -265,12 +279,7 @@ def train(args):
             logger.info(val_result)
             total_result.append(val_result)
 
-        writer.add_scalars('loss', {'train': train_loss,
-                                    'val': val_loss}, global_step)
-        writer.add_scalars('acc', {'train': train_acc,
-                                   'val': val_acc}, global_step)
-
-        if args.do_eval and val_loss < best_val_loss:
+        if val_loss < best_val_loss:
             # Save model checkpoints
             torch.save(model.state_dict(), os.path.join(save_path, 'best_model.bin'))
             torch.save(args, os.path.join(save_path, 'training_args.bin'))
@@ -280,17 +289,18 @@ def train(args):
 
         if (epoch + 1) % args.saving_step == 0:
             torch.save(model.state_dict(), os.path.join(save_path, 'epoch{}_model.bin'.format(epoch+1)))
-        
-        train_loss, train_acc = 0, 0
-
-    # Save results in 'model_saved_pretrain/results.csv'
-    results = {
-        'val_loss': best_val_loss,
-        'val_acc': best_val_acc,
-        'save_dir': save_path,
-    }
-    result_writer.update(args, **results)
-    return global_step, train_loss, train_acc, best_val_loss, best_val_acc, total_result
+            # Save results in 'model_saved_pretrain/results.csv'
+            results = {
+                'train_loss': loss_,
+                'train_acc': acc_, 
+                'val_loss': best_val_loss,
+                'val_acc': best_val_acc,
+                'save_dir': save_path,
+                'global_step': global_step,
+            }
+            result_writer.update(args, **results)
+    
+    return global_step, loss_, acc_, best_val_loss, best_val_acc, total_result
 
 
 def evaluate(args, dataloader, model, device):
@@ -336,23 +346,23 @@ def main():
     parser = argparse.ArgumentParser()
 
     # Pretrained model Parameters
-    parser.add_argument("--pretrained_type", default='etri', type=str,
+    parser.add_argument("--pretrained_type", default='skt', type=str,
                         help="type of pretrained model (skt, etri)")
     parser.add_argument("--pretrained_model_path", required=False,
                         help="path of pretrained model (If you wnat to use further-pretrained model)")
 
     # Train Parameters
-    parser.add_argument("--train_batch_size", default=80, type=int,
+    parser.add_argument("--train_batch_size", default=64, type=int,
                         help="batch size")
-    parser.add_argument("--eval_batch_size", default=80, type=int,
+    parser.add_argument("--eval_batch_size", default=64, type=int,
                         help="batch size for validation")
     parser.add_argument("--layerwise_decay", action="store_true",
                         help="Whether to use layerwise decay")
-    parser.add_argument("--learning_rate", default=1e-5, type=float,
+    parser.add_argument("--learning_rate", default=1e-4, type=float,
                         help="The initial learning rate for Adam")
-    parser.add_argument("--epochs", default=20, type=int,
+    parser.add_argument("--epochs", default=50, type=int,
                         help="total epochs")
-    parser.add_argument("--gradient_accumulation_steps", default=6, type=int,
+    parser.add_argument("--gradient_accumulation_steps", default=4, type=int,
                         help="gradient accumulation steps for large batch training")
     parser.add_argument("--warmup_percent", default=0.1, type=float,
                         help="gradient warmup percentage")
@@ -360,7 +370,7 @@ def main():
                         help="batch size")
 
     # Other Parameters
-    parser.add_argument("--logging_step", default=25, type=int,
+    parser.add_argument("--logging_step", default=5, type=int,
                         help="logging step for training loss and acc")
     parser.add_argument("--saving_step", default=5, type=int,
                         help="epoch for saving temporarily")
@@ -381,7 +391,7 @@ def main():
                         help="train data path")
     parser.add_argument("--dev_data_path", default='./data/korean_crawled_dev.csv', type=str,
                         help="dev data path")
-    parser.add_argument("--max_len", default=64, type=int,
+    parser.add_argument("--max_len", default=128, type=int,
                         help="Maximum sequence length")
 
     args = parser.parse_args()

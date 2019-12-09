@@ -104,7 +104,6 @@ def train(args):
                            shuffle=True,
                            num_workers=8,
                            pin_memory=True,
-                           drop_last=True,
                            collate_fn=collate_fn)
 
     dev_set = Datasets(file_path=args.dev_data_path,
@@ -152,14 +151,13 @@ def train(args):
 
     best_val_loss = 1e+9
     global_step = 0
+    
+    train_loss, train_acc, train_f1 = 0, 0, 0
+    logging_loss, logging_acc, logging_f1 = 0, 0, 0
 
     logger.info('***** Training starts *****')
     total_result = []
     for epoch in tqdm(range(args.epochs), desc='epochs'):
-
-        train_loss, train_acc, train_f1 = 0, 0, 0
-        logging_loss, logging_acc, logging_f1 = 0, 0, 0
-
         for step, batch in tqdm(enumerate(tr_loader), desc='steps', total=len(tr_loader)):
             model.train()
             x_train, mask_train, y_train = map(lambda x: x.to(device), batch)
@@ -204,7 +202,7 @@ def train(args):
             train_acc += batch_acc
             train_f1 += batch_macro_f1
 
-            if (step + 1) % grad_accu == 0:
+            if (global_step + 1) % grad_accu == 0:
                 if args.fp16:
                     torch.nn.utils.clip_grad_norm_(amp.master_params(optimizer), args.grad_clip_norm)
                 else:
@@ -216,12 +214,15 @@ def train(args):
                 global_step += 1
                 
                 if global_step % args.logging_step == 0:
-                    logging_acc = (train_acc - logging_acc) / args.logging_step
-                    logging_f1 = (train_f1 - logging_f1) / args.logging_step
-                    logging_loss = (train_loss - logging_loss) / args.logging_step
+                    acc_ = (train_acc - logging_acc) / args.logging_step
+                    f1_ = (train_f1 - logging_f1) / args.logging_step
+                    loss_ = (train_loss - logging_loss) / args.logging_step
+                    writer.add_scalars('loss', {'train': loss_}, global_step)
+                    writer.add_scalars('acc', {'train': acc_}, global_step)
+                    writer.add_scalars('macro_f1', {'train': f1_}, global_step)
 
-                    logger.info('[{}/{}], trn loss : {:.3f}, trn acc : {:.3f}, macro f1 : {:.3f}, lr : {:.3f}'.format(
-                        global_step, t_total, logging_loss, logging_acc, logging_f1, scheduler.get_lr()[0]
+                    logger.info('[{}/{}], trn loss : {:.3f}, trn acc : {:.3f}, macro f1 : {:.3f}'.format(
+                        global_step, t_total, loss_, acc_, f1_
                     ))
                     logging_acc, logging_f1, logging_loss = train_acc, train_f1, train_loss
 
@@ -231,30 +232,17 @@ def train(args):
                     logger.info("\n\n***f1-score***\n" + f1_log + "\n\n***confusion matrix***\n{}".format(
                         confusion_matrix(y_train.tolist(), y_max.tolist())))
 
-        train_loss /= (step + 1) // grad_accu
-        train_acc /= (step + 1) // grad_accu
-        train_f1 /= (step + 1) // grad_accu
-
         # Validation
         val_loss, val_acc, val_macro_f1 = evaluate(args, dev_loader, model, device)
-        
-        train_result = '[{}/{}] tr loss : {:.3f}, tr acc : {:.3f}. tr macro f1 : {:.3f}'.format(
-            global_step, t_total, train_loss, train_acc, train_f1
-        )
         val_result = '[{}/{}] val loss : {:.3f}, val acc : {:.3f}. val macro f1 : {:.3f}'.format(
             global_step, t_total, val_loss, val_acc, val_macro_f1
         )
 
-        logger.info(train_result)
+        writer.add_scalars('loss', {'val': val_loss}, global_step)
+        writer.add_scalars('acc', {'val': val_acc}, global_step)
+        writer.add_scalars('macro_f1', {'val': val_macro_f1}, global_step)
         logger.info(val_result)
         total_result.append(val_result)
-
-        writer.add_scalars('loss', {'train': train_loss,
-                                    'val': val_loss}, global_step)
-        writer.add_scalars('acc', {'train': train_acc,
-                                   'val': val_acc}, global_step)
-        writer.add_scalars('macro_f1', {'train': train_f1,
-                                        'val': val_macro_f1}, global_step)
 
         if val_loss < best_val_loss:
             # Save model checkpoints
@@ -265,8 +253,6 @@ def train(args):
             best_val_acc = val_acc
             best_val_macro_f1 = val_macro_f1
 
-        train_loss, train_acc = 0, 0
-
     # Save results in 'model_saved_finetuning/results.csv'
     results = {
         'val_loss': best_val_loss,
@@ -276,7 +262,7 @@ def train(args):
         'pretrained_path': pretrained_path,
     }
     result_writer.update(args, **results)
-    return global_step, train_loss, train_acc, best_val_loss, best_val_acc, total_result
+    return global_step, loss_, acc_, best_val_loss, best_val_acc, total_result
 
 
 def evaluate(args, dataloader, model, device, objective='classification'):
@@ -348,13 +334,13 @@ def main():
                         help="path of pretrained model (If you wnat to use further-pretrained model)")
 
     # Train Parameters
-    parser.add_argument("--train_batch_size", default=32, type=int,
+    parser.add_argument("--train_batch_size", default=50, type=int,
                         help="batch size")
-    parser.add_argument("--eval_batch_size", default=32, type=int,
+    parser.add_argument("--eval_batch_size", default=50, type=int,
                         help="batch size for validation")
     parser.add_argument("--layerwise_decay", action="store_true",
                         help="Whether to use layerwise decay")
-    parser.add_argument("--learning_rate", default=1e-5, type=float,
+    parser.add_argument("--learning_rate", default=2e-5, type=float,
                         help="The initial learning rate for Adam")
     parser.add_argument("--epochs", default=5, type=int,
                         help="total epochs")
