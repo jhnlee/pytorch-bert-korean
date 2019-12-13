@@ -137,7 +137,7 @@ def train(args):
         model, optimizer = amp.initialize(model, optimizer, opt_level=args.fp16_opt_level, verbosity=0)
 
     # tensorboard setting
-    save_path = "./model_saved_finetuning/lr {}, batch {}, total{}, warmup {}, len {}, {}".format(
+    save_path = "./model_saved_finetuning/lr{},batch{},total{},warmup{},len{},{}".format(
         args.learning_rate, args.train_batch_size * args.gradient_accumulation_steps, t_total,
         args.warmup_percent, args.max_len, args.pretrained_type)
 
@@ -334,9 +334,9 @@ def main():
                         help="path of pretrained model (If you wnat to use further-pretrained model)")
 
     # Train Parameters
-    parser.add_argument("--train_batch_size", default=50, type=int,
+    parser.add_argument("--train_batch_size", default=100, type=int,
                         help="batch size")
-    parser.add_argument("--eval_batch_size", default=50, type=int,
+    parser.add_argument("--eval_batch_size", default=100, type=int,
                         help="batch size for validation")
     parser.add_argument("--layerwise_decay", action="store_true",
                         help="Whether to use layerwise decay")
@@ -371,7 +371,7 @@ def main():
                         help="dev data path")
     parser.add_argument("--num_label", default='multi', type=str,
                         help="Number of labels in datastes(binary or multi)")
-    parser.add_argument("--max_len", default=64, type=int,
+    parser.add_argument("--max_len", default=50, type=int,
                         help="Maximum sequence length")
 
     args = parser.parse_args()

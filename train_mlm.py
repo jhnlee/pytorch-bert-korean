@@ -89,32 +89,7 @@ class MLMBatchFunction:
                 masked_idcs.append(0)
 
         return sample, masked_idcs
-'''
-dd = Datasets('./data/korean_crawled_dev.csv', pretrained_type='skt')
-from torch.utils.data import DataLoader
-ddd = DataLoader(dd, collate_fn=MLMBatchFunction(64, dd.vocab), batch_size=2)
-for i, batch in enumerate(ddd):
-    if i>0:
-        break
-dd.vocab
-batch
-batch[0][0]
-idx2vocab = {v:k for k, v in dd.vocab.items()}
-[idx2vocab[i] for i in batch[0][2].tolist()]
 
-dd = Datasets('./data/korean_crawled_dev.csv', pretrained_type='etri')
-from torch.utils.data import DataLoader
-ddd = DataLoader(dd, collate_fn=MLMBatchFunction(64, dd.vocab), batch_size=2)
-for i, batch in enumerate(ddd):
-    if i>0:
-        break
-batch
-dd.vocab
-
-batch[0][0]
-idx2vocab = {v:k for k, v in dd.vocab.items()}
-[idx2vocab[i] for i in batch[0][2].tolist()]
-'''
 def train(args):
     set_seed(args)
     # Set device
@@ -191,7 +166,7 @@ def train(args):
         model, optimizer = amp.initialize(model, optimizer, opt_level=args.fp16_opt_level, verbosity=0)
 
     # tensorboard setting
-    save_path = "./model_saved_pretrain/lr {}, batch {}, total {}, warmup {}, len {}, {}".format(
+    save_path = "./model_saved_pretrain/lr{},batch{},total{},warmup{},len{},{}".format(
         args.learning_rate, args.train_batch_size * args.gradient_accumulation_steps,
         t_total, args.warmup_percent, args.max_len, args.pretrained_type)
 
@@ -364,13 +339,13 @@ def main():
                         help="total epochs")
     parser.add_argument("--gradient_accumulation_steps", default=4, type=int,
                         help="gradient accumulation steps for large batch training")
-    parser.add_argument("--warmup_percent", default=0.1, type=float,
+    parser.add_argument("--warmup_percent", default=0.005, type=float,
                         help="gradient warmup percentage")
     parser.add_argument("--grad_clip_norm", default=1.0, type=float,
                         help="batch size")
 
     # Other Parameters
-    parser.add_argument("--logging_step", default=5, type=int,
+    parser.add_argument("--logging_step", default=50, type=int,
                         help="logging step for training loss and acc")
     parser.add_argument("--saving_step", default=5, type=int,
                         help="epoch for saving temporarily")
