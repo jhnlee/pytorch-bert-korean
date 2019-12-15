@@ -81,7 +81,8 @@ def train(args):
     logger.info('Pretrain Model : {}'.format(pretrained_model_path))
     pretrained = torch.load(pretrained_model_path)
     
-    if args.pretrained_type == 'skt':
+    if args.pretrained_type == 'skt' and 'bert.' not in list(pretrained.keys())[0]:
+        logger.info('modify parameter names')
         # Change parameter name for consistency
         new_keys_ = ['bert.' + k for k in pretrained.keys()]
         old_values_ = pretrained.values()
@@ -208,8 +209,8 @@ def train(args):
                 else:
                     torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip_norm)
 
-                scheduler.step()
                 optimizer.step()
+                scheduler.step()
                 model.zero_grad()
                 global_step += 1
                 
