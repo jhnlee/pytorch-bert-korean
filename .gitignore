@@ -7,3 +7,5 @@ model_saved_pretrain/
 .idea/
 .vscode/
 trainer.sh
+api/
+finetune_test.sh
