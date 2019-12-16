@@ -60,7 +60,7 @@ class MLMBatchFunction:
         if diff > 0:
             sample += [pad] * diff
         else:
-            sample = sample[-max_len:]
+            sample = [sample[0]] + sample[-max_len+1:]
         return sample
 
     def make_masked_input(self, sample):
@@ -255,7 +255,7 @@ def train(args):
             logger.info(val_result)
             total_result.append(val_result)
 
-        if val_loss < best_val_loss:
+        if val_loss <= best_val_loss:
             # Save model checkpoints
             torch.save(model.state_dict(), os.path.join(save_path, 'best_model.bin'))
             torch.save(args, os.path.join(save_path, 'training_args.bin'))
@@ -322,7 +322,7 @@ def main():
     parser = argparse.ArgumentParser()
 
     # Pretrained model Parameters
-    parser.add_argument("--pretrained_type", default='skt', type=str,
+    parser.add_argument("--pretrained_type", default='etri', type=str,
                         help="type of pretrained model (skt, etri)")
     parser.add_argument("--pretrained_model_path", required=False,
                         help="path of pretrained model (If you wnat to use further-pretrained model)")
@@ -336,7 +336,7 @@ def main():
                         help="Whether to use layerwise decay")
     parser.add_argument("--learning_rate", default=1e-4, type=float,
                         help="The initial learning rate for Adam")
-    parser.add_argument("--epochs", default=50, type=int,
+    parser.add_argument("--epochs", default=45, type=int,
                         help="total epochs")
     parser.add_argument("--gradient_accumulation_steps", default=4, type=int,
                         help="gradient accumulation steps for large batch training")
@@ -367,7 +367,7 @@ def main():
                         help="train data path")
     parser.add_argument("--dev_data_path", default='./data/korean_crawled_dev.csv', type=str,
                         help="dev data path")
-    parser.add_argument("--max_len", default=128, type=int,
+    parser.add_argument("--max_len", default=90, type=int,
                         help="Maximum sequence length")
 
     args = parser.parse_args()
