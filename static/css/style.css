@@ -1,0 +1,33 @@
+body {
+    font-family: "Open Sans", sans-serif;
+    text-align: center;
+  }
+  
+  input {
+    text-align: center;
+    display: block;
+    width: 320px;
+    height: 40px;
+    padding: 10px;
+    background: rgba(0, 0, 0, 0.1);
+    border: 1px solid rgba(255, 255, 255);
+  }
+  
+  button {
+    background: rgb(102, 163, 255);
+    border: none;
+    width: 340px;
+    height: 40px;
+    text-align: center;
+    text-decoration: none;
+    display: inline-block;
+    cursor: pointer;
+  }
+  
+  button:hover {
+    background: rgba(0, 82, 204, 0.5);
+  }
+  
+  button:active {
+    color: #999999;
+  }

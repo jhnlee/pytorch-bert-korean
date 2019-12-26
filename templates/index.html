@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="ko" dir="ltr">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+  <link href="https://fonts.googleapis.com/css?family=Open+Sans" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/style.css">
+  <title>Multi-Emotion Classifier</title>
+</head>
+
+<body>
+  <form action="/">
+    <div id="classifier">
+      <br>
+      <p>Enter a Sentence:</p>
+
+      <center>
+        <input align="center" type="text" name="sentence" maxlength="500" placeholder="enter sentence here" required>
+      </center>
+      <br>
+
+      <center>
+        <button id="btn-submit" type="submit" value="Submit" align="center">Submit</button>
+      </center>
+
+      <br>
+
+      <p>
+        {{ sentence }} 
+        <br>
+        <br>
+        {% for k, v in result.items() %}
+          <li> {{ k }} : {{ v }}</li>
+        {% endfor %}
+      </p>
+    </div>
+  </form>
+</body>
+
+</html>

@@ -41,7 +41,8 @@ class Datasets(Dataset):
 
         return tokens, label
 
-    def normalize_string(self, s):
+    @staticmethod
+    def normalize_string(s):
         s = html.unescape(s)
         s = re.sub(r"[\s]", r" ", s)
         s = re.sub(r"[^a-zA-Z가-힣ㄱ-ㅎ0-9.!?]+", r" ", s)
