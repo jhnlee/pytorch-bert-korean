@@ -4,9 +4,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-  <link href="https://fonts.googleapis.com/css?family=Open+Sans" rel="stylesheet">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Open+Sans">
   <link rel="stylesheet" href="/static/css/style.css">
   <title>Multi-Emotion Classifier</title>
+  <script src="/static/Chart.min.js"></script>
 </head>
 
 <body>
@@ -29,12 +30,70 @@
       <p>
         {{ sentence }} 
         <br>
-        <br>
-        {% for k, v in result.items() %}
-          <li> {{ k }} : {{ v }}</li>
-        {% endfor %}
-      </p>
     </div>
+  </div>
+  <div id="table">
+    <p>
+      <center>
+      <table>      
+        <tbody>    
+          <tr>
+            <th>Emotion</th>
+            <td>  </td>
+            {% for k in result.keys() %}
+              <td>{{ k }}</td>
+            {% endfor %}
+          </tr>
+          <tr>
+            <th>Probability</th>
+            <td>  </td>
+            {% for v in result.values() %}
+              <td>{{ (v*100)|round(2)|string }}%</td>
+            {% endfor %}
+          </tr>
+        </tbody>
+      </table> 
+      </center>
+    </p>
+    </div>
+    <div id="barplot">
+      <center>
+      <canvas id="EmotionChart" width="340" height="340"></canvas>
+      <script>
+        var mychart = document.getElementById("EmotionChart");
+        var EmotionChart = new Chart(mychart, {
+            type: 'horizontalBar',
+            data: {
+              labels : [
+                {% for k in result.keys() %}
+                  "{{ k }}",
+                {% endfor %}],
+              datasets : [{
+                  fillColor : "rgba(151,187,205,0.8)",
+                  strokeColor: "rgba(151,187,205,1)",
+                  pointColor: "rgba(151,187,205,1)",
+                  label: "softmax",
+                  data : [
+                    {% for v in result.values() %}
+                      {{ v }},
+                    {% endfor %}]
+                }]
+            },
+            options: {
+                maintainAspectRatio: false,
+                responsive: false,
+                scales: {
+                    yAxes: [{
+                        ticks: {
+                            beginAtZero:true
+                        }
+                    }]
+                }
+            }
+        });
+    </script>
+    </center>
+  </div>
   </form>
 </body>
 

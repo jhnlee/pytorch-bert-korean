@@ -31,3 +31,8 @@ body {
   button:active {
     color: #999999;
   }
+
+  table {
+    width: 100%;
+    height: 100px;
+  }
