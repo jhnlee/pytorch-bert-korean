@@ -73,11 +73,19 @@ $ python train_classification.py\
         --fp16\
         --fp16_opt_level="O1"
 ```
+Inference   
+```
+$ python test.py\
+    --pretrained_model_path="./data/korean_single_test.csv" 
+```
+After inference, result file saved to `/result` folder.  
+- `/result/test_result.csv` : predicted label for test data   
+- `/result/test_result.png` : confusion matrix for test data   
 
 ## Result
 **Overall**  
 
-| Test Set(145,409) | |
+| Test Set(3,859) | |
 | :---: | :---: |
 | Accuracy | 57.69% |
 | Macro F1 | 56.84% |
