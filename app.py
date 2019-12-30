@@ -5,8 +5,8 @@ from pytorch_transformers.modeling_bert import BertConfig
 import numpy as np
 import torch
 
-pretrained_model_path = './model_saved_finetuning/lr2e-05,batch100,total927,warmup0.1,len64,etri/best_model.bin'
-config_path = './pretrained_model/etri/bert_config.json'
+pretrained_model_path = './best_model/best_model.bin'
+config_path = './best_model/bert_config.json'
 
 pretrained = torch.load(pretrained_model_path)
 bert_config = BertConfig(config_path)
