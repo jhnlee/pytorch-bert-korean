@@ -5,8 +5,8 @@ from pytorch_transformers.modeling_bert import BertConfig
 import numpy as np
 import torch
 
-pretrained_model_path = '/home/mnt/E/bert-bin2mul/model_saved_finetuning/lr2e-05,batch100,total927,warmup0.1,len64,etri/best_model.bin'
-config_path = '/home/mnt/E/bert-bin2mul/pretrained_model/etri/bert_config.json'
+pretrained_model_path = './model_saved_finetuning/lr2e-05,batch100,total927,warmup0.1,len64,etri/best_model.bin'
+config_path = './pretrained_model/etri/bert_config.json'
 
 pretrained = torch.load(pretrained_model_path)
 bert_config = BertConfig(config_path)
@@ -31,8 +31,9 @@ def get_prediction(sentence):
     output_softmax = softmax(output)[0]
     max_out = label_list[output_softmax.argmax()]
     argidx = output_softmax.argsort(descending=True)
-    result = {label_list[i]: round(output_softmax[i].item(), 3) for i in argidx}
-    return max_out, result
+    result = {label_list[i]: round(output_softmax[i].item(), 3) for i in range(len(label_list))}
+    sorted_result = {label_list[i]: round(output_softmax[i].item(), 3) for i in argidx}
+    return max_out, result, sorted_result
 
 app = Flask(__name__)
 app._static_folder = './static'
@@ -41,7 +42,7 @@ app._static_folder = './static'
 def predict():
     if request.method == 'POST':
         sentence = request.json['sentence']
-        max_out, result = get_prediction(sentence)
+        max_out, result, sorted_result = get_prediction(sentence)
         return jsonify({'input': sentence,
                         'emotion': max_out,
                         'output': result})
@@ -50,10 +51,10 @@ def predict():
 def index():
     if request.args:
         sentence = request.args['sentence']
-        max_out, result = get_prediction(sentence)
-        return render_template('index.html', sentence=sentence,result=result)
+        max_out, result, sorted_result = get_prediction(sentence)
+        return render_template('index.html', sentence=sentence, result=result, sorted_result=sorted_result) 
     else:
-        return render_template('index.html', result={})
+        return render_template('index.html', result={}, sorted_result={})
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', debug=True)
