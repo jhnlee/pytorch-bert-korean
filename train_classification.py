@@ -234,7 +234,7 @@ def train(args):
                         confusion_matrix(y_train.tolist(), y_max.tolist())))
 
         # Validation
-        val_loss, val_acc, val_macro_f1 = evaluate(args, dev_loader, model, device)
+        val_loss, val_acc, val_macro_f1, _ = evaluate(args, dev_loader, model, device)
         val_result = '[{}/{}] val loss : {:.3f}, val acc : {:.3f}. val macro f1 : {:.3f}'.format(
             global_step, t_total, val_loss, val_acc, val_macro_f1
         )
@@ -313,10 +313,11 @@ def evaluate(args, dataloader, model, device, objective='classification'):
     logger.info('***** Evaluation Results *****')
     f1_results = [(l, r['f1-score']) for i, (l, r) in enumerate(dev_cr.items()) if i < len(label_list)]
     f1_log = "\n".join(["{} : {}".format(l, f) for l, f in f1_results])
-    logger.info("\n***f1-score***\n" + f1_log + "\n***confusion matrix***\n{}".format(confusion_matrix(total_y, total_y_hat)))
+    cm = confusion_matrix(total_y, total_y_hat)
+    logger.info("\n***f1-score***\n" + f1_log + "\n***confusion matrix***\n{}".format(cm))
 
     val_loss /= (val_step + 1)
-    return val_loss, val_acc, val_macro_f1
+    return val_loss, val_acc, val_macro_f1, (total_y_hat, cm)
 
 
 def set_seed(args):
@@ -343,7 +344,7 @@ def main():
                         help="Whether to use layerwise decay")
     parser.add_argument("--learning_rate", default=2e-5, type=float,
                         help="The initial learning rate for Adam")
-    parser.add_argument("--epochs", default=5, type=int,
+    parser.add_argument("--epochs", default=3, type=int,
                         help="total epochs")
     parser.add_argument("--gradient_accumulation_steps", default=1, type=int,
                         help="gradient accumulation steps for large batch training")
@@ -372,7 +373,7 @@ def main():
                         help="dev data path")
     parser.add_argument("--num_label", default='multi', type=str,
                         help="Number of labels in datastes(binary or multi)")
-    parser.add_argument("--max_len", default=50, type=int,
+    parser.add_argument("--max_len", default=64, type=int,
                         help="Maximum sequence length")
 
     args = parser.parse_args()

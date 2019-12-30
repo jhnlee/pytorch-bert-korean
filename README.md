@@ -4,10 +4,12 @@ pytorch BERT Trainer using HuggingFace transformers
 ## Requirements
 - python 3.6   
 - pytorch 1.12  
+- cuda 10.0
 - tensorflow 1.14 (for tensorboard)  
 - pytorch_transformers  
 - gluonnlp >= 0.6.0  
 - apex (for mixed precision training)  
+- flask (for use api)
 
 
 Pretrained Korean Bert Model ([ETRI](http://aiopen.etri.re.kr/service_dataset.php) or [SKT](http://aiopen.etri.re.kr/service_dataset.php))  
@@ -71,3 +73,31 @@ $ python train_classification.py\
         --fp16\
         --fp16_opt_level="O1"
 ```
+
+## Result
+**Overall**  
+|Test Set(145,409)||
+|:-:|:-:|
+|Accuracy|57.69%|
+|Macro F1|56.84% |
+
+**Confusion matrix**
+![CM](./result/test_result.png)  
+
+**F1 score for each Emotion**  
+|Emotion|F1|
+|:-:|:-:|
+|공포|60.00%|
+|놀람|57.49% |
+|분노|54.60%|
+|슬픔|62.64%|
+|중립|44.21%|
+|행복|81.88%|
+|혐오|37.04%|
+
+## Simple Web Application with Flask  
+```
+$ python app.py
+```  
+<img src="./images/emotion1.png" width="60%">
+<img src="./images/emotion2.png" width="60%">
