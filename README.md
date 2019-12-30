@@ -9,7 +9,7 @@ pytorch BERT Trainer using HuggingFace transformers
 - pytorch_transformers  
 - gluonnlp >= 0.6.0  
 - apex (for mixed precision training)  
-- flask (for use api)
+- flask (for using api)
 
 
 Pretrained Korean Bert Model ([ETRI](http://aiopen.etri.re.kr/service_dataset.php) or [SKT](http://aiopen.etri.re.kr/service_dataset.php))  
@@ -76,28 +76,34 @@ $ python train_classification.py\
 
 ## Result
 **Overall**  
-|Test Set(145,409)||
-|:-:|:-:|
-|Accuracy|57.69%|
-|Macro F1|56.84% |
 
-**Confusion matrix**
-![CM](./result/test_result.png)  
+| Test Set(145,409) | |
+| :---: | :---: |
+| Accuracy | 57.69% |
+| Macro F1 | 56.84% |
 
 **F1 score for each Emotion**  
-|Emotion|F1|
-|:-:|:-:|
-|공포|60.00%|
-|놀람|57.49% |
-|분노|54.60%|
-|슬픔|62.64%|
-|중립|44.21%|
-|행복|81.88%|
-|혐오|37.04%|
+
+| Emotion | F1 |
+| :---: | :---: |
+| 공포 | 60.00% |
+| 놀람 | 57.49% |
+| 분노 | 54.60% |
+| 슬픔 | 62.64% |
+| 중립 | 44.21% |
+| 행복 | 81.88% |
+| 혐오 | 37.04% |
+
+**Confusion matrix**  
+<img src="./images/best_result.png" width="80%">
 
 ## Simple Web Application with Flask  
 ```
 $ python app.py
 ```  
-<img src="./images/emotion1.png" width="60%">
-<img src="./images/emotion2.png" width="60%">
+
+Sad case             |  Happy case
+:-------------------------:|:-------------------------:
+<img src="./images/emotion1.png" width="100%">  | <img src="./images/emotion2.png" width="100%">
+
+
